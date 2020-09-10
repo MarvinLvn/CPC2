@@ -217,12 +217,19 @@ def getAR(args):
     return arNet
 
 
-def loadModel(pathCheckpoints, loadStateDict=True):
+def loadModel(pathCheckpoints, loadStateDict=True, intermediate_idx=0):
     models = []
     hiddenGar, hiddenEncoder = 0, 0
     for path in pathCheckpoints:
         print(f"Loading checkpoint {path}")
         _, _, locArgs = getCheckpointData(os.path.dirname(path))
+
+        if intermediate_idx != 0:
+            if intermediate_idx < locArgs.nLevelsGRU:
+                locArgs.nLevelsGRU = locArgs.nLevelsGRU- intermediate_idx
+            else:
+                raise ValueError("The AR network comprises %d layers. "
+                                 "You can't ask to extract the %d layer. " % (locArgs.nLevelsGRU,locArgs.nLevelsGRU-intermediate_idx))
 
         doLoad = locArgs.load is not None and \
             (len(locArgs.load) > 1 or

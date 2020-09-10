@@ -1,4 +1,4 @@
-name: cpc37_v5
+name: cpc2
 channels:
   - pytorch
   - anaconda

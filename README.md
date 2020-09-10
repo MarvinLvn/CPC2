@@ -18,7 +18,7 @@ The installation is a tiny bit involved due to the torch-audio dependency.
  * MacOS: `brew install sox`
  * Linux: `sudo apt-get install sox libsox-dev libsox-fmt-all`
 
-2/ `conda env create -f environment.yml && conda activate cpc37`
+2/ `conda env create -f environment.yml && conda activate cpc2`
 
 3/ Run setup.py
 `python setup.py develop`
