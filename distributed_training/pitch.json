@@ -1,0 +1,12 @@
+{
+   "pathDB": ["/datasets01_101/LibriSpeech/022219/train-clean-100"],
+   "dropout": [true],
+   "nLevelsGRU": [2],
+   "multihead_rnn": [true],
+   "restart": [true],
+   "augment_future": [true, false],
+   "augment_past": [true],
+   "augment_type": ["pitch"],
+   "schedulerRamp": [10],
+   "random_seed": [2]
+}
