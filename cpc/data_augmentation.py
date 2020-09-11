@@ -5,7 +5,7 @@ import torchaudio
 import numpy as np
 from copy import deepcopy
 from torch.utils.data.dataloader import _SingleProcessDataLoaderIter
-import augment.sox_effects as sox_effects
+import augment.effects as sox_effects
 
 class BandrejectAugment:
     def __init__(self, scaler=1.0):

@@ -18,7 +18,6 @@ import cpc.criterion as cr
 import cpc.model as model
 import cpc.utils.misc as utils
 import cpc.feature_loader as fl
-from cpc.balance_sampler import get_balance_sampler
 from cpc.cpc_default_config import set_default_cpc_config
 from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
                         PeakNorm, ComposeTransform

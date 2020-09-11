@@ -5,4 +5,3 @@
 from .bert import CPCBertCriterion
 from .clustering import DeepEmbeddedClustering, DeepClustering, \
     CTCCLustering, buildNewPhoneDict
-from .adaptive_span import TransformerAdaptiveSeq

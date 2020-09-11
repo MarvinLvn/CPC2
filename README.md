@@ -23,6 +23,9 @@ The installation is a tiny bit involved due to the torch-audio dependency.
 3/ Run setup.py
 `python setup.py develop`
 
+4/ Install wavaugment
+`git clone git@github.com:facebookresearch/WavAugment.git && cd WavAugment && python setup.py develop`
+
 You can test your installation with:
 `nosetests -d`
 
