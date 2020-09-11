@@ -118,11 +118,10 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--noise_extension', type=str, default='.wav')
     group_augment.add_argument('--augment_future', action='store_true')
     group_augment.add_argument('--augment_past', action='store_true')
-    group_augment.add_argument('--augment_type', type=str,
-                                choices=['none', 'bandreject', 'pitch',
+    group_augment.add_argument('--augment_type', type=str, choices=['none', 'bandreject', 'pitch',
                                          'pitch_dropout', 'pitch_quick',
                                          'additive', 'reverb', 'time_dropout',
-                                         'reverb_dropout'])
+                                         'reverb_dropout'], nargs='+')
     group_augment.add_argument('--bandreject_scaler', type=float, default=1.0)
     group_augment.add_argument('--additive_noise_snr', type=float, default=15.0)
     group_augment.add_argument('--t_ms', type=int, default=100)

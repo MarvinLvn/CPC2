@@ -26,6 +26,8 @@ from cpc.criterion.research import CPCBertCriterion, DeepEmbeddedClustering, \
 from cpc.distributed_training.distributed_mode import init_distributed_mode
 from cpc.data_augmentation import augmentation_factory
 
+
+
 def get_size_graph(var):
 
     seen = set()
@@ -489,8 +491,8 @@ def main(argv):
         seqVal = filterSeqs(args.pathVal, seqNames)
 
     if args.debug:
-        seqTrain = seqTrain[-1000:]
-        seqVal = seqVal[-100:]
+        seqTrain = seqTrain[-10:]
+        seqVal = seqVal[-10:]
 
     phoneLabels, nPhones = None, None
     if args.supervised and args.pathPhone is not None:
@@ -515,7 +517,7 @@ def main(argv):
         print("")
         print(f'Loading noise data at {args.pathDBNoise}')
         print("Loading the noise dataset")
-        noiseDataset =  AudioBatchData(args.pathDBNoise, args.sizeWindow,
+        noiseDataset = AudioBatchData(args.pathDBNoise, args.sizeWindow,
                                        seqNoise, None, 1,
                                        transform=PeakNorm(),
                                        nProcessLoader=args.n_process_loader,

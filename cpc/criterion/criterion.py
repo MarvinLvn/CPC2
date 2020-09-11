@@ -235,8 +235,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
         else:
             self.wPrediction = PredictionNetwork(
                 nPredicts, dimOutputAR, dimOutputEncoder, rnnMode=rnnMode,
-                dropout=dropout, sizeInputSeq=sizeInputSeq - nPredicts,
-                transformer_pruning=transformer_pruning)
+                dropout=dropout, sizeInputSeq=sizeInputSeq - nPredicts)
 
         self.nPredicts = nPredicts
         self.negativeSamplingExt = negativeSamplingExt

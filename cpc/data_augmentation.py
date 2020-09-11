@@ -19,8 +19,8 @@ class BandrejectAugment:
             low, high = BandrejectAugment.generate_freq_mask(scaler)
             return f'{high}-{low}'
 
-        self.effect = sox_effects.EffectChain().denormalize().sinc(
-            '-a', '120', random_band).dither().normalize()
+        self.effect = sox_effects.EffectChain().sinc(
+            '-a', '120', random_band).dither()
 
     @staticmethod
     def freq2mel(f):
@@ -49,7 +49,7 @@ class BandrejectAugment:
                     'rate': 16000.0,
                     'bits_per_sample': 32}
 
-        y, _ = self.effect.apply(
+        y = self.effect.apply(
             x, src_info=src_info, target_info=self.target_info)
 
         return y
@@ -61,15 +61,14 @@ class PitchAugment:
             shift_max {int} -- shift in 1/100 of semi-tone (default: {100})
         """
         random_shift = lambda: np.random.randint(-shift_max, shift_max)
-        effect = sox_effects.EffectChain().denormalize().pitch(random_shift)
+        effect = sox_effects.EffectChain().pitch(random_shift)
 
         if quick:
             effect = effect.rate("-q", 16000)
         else:
             effect = effect.rate(16000)
-        effect = effect.dither().normalize()
+        effect = effect.dither()
         self.effect = effect
-
 
     def __call__(self, x):
         target_info = {'channels': 1,
@@ -86,7 +85,7 @@ class PitchAugment:
                     'rate': 16000.0,
                     'bits_per_sample': 32}
 
-        y, _ = self.effect.apply(x, src_info=src_info, target_info=target_info)
+        y = self.effect.apply(x, src_info=src_info, target_info=target_info)
 
         if torch.isnan(y).any() or torch.isinf(y).any():
             return x.clone()
@@ -94,15 +93,12 @@ class PitchAugment:
         y = y.view_as(x)
         return y
 
-
-
 class PitchDropout:
     def __init__(self, T_ms=100, shift_max=300):
         random_shift = lambda: np.random.randint(-shift_max, shift_max)
-        effect = sox_effects.EffectChain().denormalize().pitch(random_shift).rate("-q", 16000).dither()
-        effect = effect.normalize().time_dropout(max_seconds=T_ms / 1000.0)
+        effect = sox_effects.EffectChain().pitch(random_shift).rate("-q", 16000).dither()
+        effect = effect.time_dropout(max_seconds=T_ms / 1000.0)
         self.effect = effect
-
 
     def __call__(self, x):
         target_info = {'channels': 1,
@@ -119,36 +115,36 @@ class PitchDropout:
                     'rate': 16000.0,
                     'bits_per_sample': 32}
 
-        y, _ = self.effect.apply(x, src_info=src_info, target_info=target_info)
+        y = self.effect.apply(x, src_info=src_info, target_info=target_info)
 
         if torch.isnan(y).any() or torch.isinf(y).any():
             return x.clone()
 
         y = y.view_as(x)
+
         return y
 
 
 class ReverbAugment:
     def __init__(self, shift_max=100):
         random_room_size = lambda: np.random.randint(0, shift_max)
-        self.effect = sox_effects.EffectChain().denormalize().reverb("50", "50", random_room_size).channels().dither().normalize()
+        self.effect = sox_effects.EffectChain().reverb(100, 100, random_room_size).channels(1).dither()
 
     def __call__(self, x):
         src_info = {'channels': 1,
                     'length': x.size(1),
                     'precision': 32,
-                    'rate': 16000.0,
+                    'rate': 16_000,
                     'bits_per_sample': 32}
 
         target_info = {'channels': 1,
-                    'length': x.size(1),
-                    'precision': 16,
-                    'rate': 16000.0,
-                    'bits_per_sample': 32}
+                       'length': x.size(1),
+                       'precision': 16,
+                       'rate': 16_000,
+                       'bits_per_sample': 32}
 
-        y, sr = self.effect.apply(x, src_info=src_info,
+        y = self.effect.apply(x, src_info=src_info,
                                   target_info=target_info)
-
         y = y.view_as(x)
         return y
 
@@ -173,13 +169,14 @@ class AdditiveNoiseAugment:
             noise = next(self.noise_data_loader)[0]
         #noise = self.noise_dataset[idx][0]
         # noise is non-augmented, we get two identical samples
+        self.t = self.t/2
         noise = noise[0, 0, ...]
 
         noised = self.t * x + (1.0 - self.t) * noise.view_as(x)
+
         return noised
 
 class RandomAdditiveNoiseAugment:
-
     def __init__(self, snr=15):
         self.snr = np.exp(snr * np.log(10) / 10)
 
@@ -194,8 +191,8 @@ class ReverbDropout:
     def __init__(self, T_ms=100):
         random_room_size = lambda: np.random.randint(0, 100)
         self.effect = sox_effects.EffectChain() \
-            .denormalize().reverb("50", "50", random_room_size) \
-            .channels().dither().normalize().time_dropout(max_seconds=T_ms / 1000.0)
+            .reverb("50", "50", random_room_size) \
+            .channels().dither().time_dropout(max_seconds=T_ms / 1000.0)
 
     def __call__(self, x):
         src_info = {'channels': 1,
@@ -210,7 +207,7 @@ class ReverbDropout:
                     'rate': 16000.0,
                     'bits_per_sample': 32}
 
-        y, sr = self.effect.apply(x, src_info=src_info, target_info=target_info)
+        y = self.effect.apply(x, src_info=src_info, target_info=target_info)
 
         y = y.view_as(x)
         return y
@@ -221,7 +218,7 @@ class TimeDropoutAugment:
         self.effect = sox_effects.EffectChain().time_dropout(max_seconds=T_ms / 1000.0)
 
     def __call__(self, x):
-        y, sr = self.effect.apply(x, src_info={'rate': 16000.0}, target_info={'rate': 16000.0})
+        y = self.effect.apply(x, src_info={'rate': 16000.0}, target_info={'rate': 16000.0})
         return y
 
 
@@ -237,49 +234,51 @@ class AugmentCfg:
 
 class CombinedTransforms:
 
-    def __init__(self, augment_cfgs):
+    def __init__(self, augment_cfgs, **kwargs):
 
-        self.transfors_cfgs = [x for x in augment_cfgs]
-        for x in self.transfors_cfgs:
-            print(x)
+        self.transfors_cfgs = [get_augment(x, **kwargs) for x in augment_cfgs]
 
     def __call__(self, x):
-        cfg = random.choice(self.transfors_cfgs)
-        transform = get_augment(cfg.augment_type, **cfg.config)
-        if transform is None:
-            return x
-        return transform(x)
-        # for cfg in self.transfors_cfgs:
-        #     transform = get_augment(cfg.augment_type, **cfg.config)
-        #     if transform is not None:
-        #         x = transform(x)
-        #
-        # return x
+        for transform in self.transfors_cfgs:
+            if transform is not None:
+                x = transform(x)
+        return x
 
 
 def get_augment(augment_type, **kwargs):
+    # Not clean, but allows the user to apply different kind of augmentations
     if not augment_type or augment_type == 'none':
         return None
     elif augment_type == 'bandreject':
-        return BandrejectAugment(**kwargs)
+        return BandrejectAugment(scaler=kwargs['bandreject_scaler'])
+    elif augment_type == 'additive':
+        if not kwargs['noise_dataset']: raise RuntimeError('Noise dataset is needed for the additive noise')
+        return AdditiveNoiseAugment(kwargs['noise_dataset'], kwargs['additive_noise_snr'])
     elif augment_type == 'pitch':
-        return PitchAugment(**kwargs)
+        return PitchAugment(quick=kwargs['pitch_quick'])
     elif augment_type == 'reverb':
-        return ReverbAugment(**kwargs)
+        return ReverbAugment()
     elif augment_type == 'time_dropout':
-        return TimeDropoutAugment(**kwargs)
+        return TimeDropoutAugment(kwargs['t_ms'])
     elif augment_type == 'reverb_dropout':
-        return ReverbDropout(**kwargs)
+        return ReverbDropout(kwargs['t_ms'])
     elif augment_type == 'random_noise':
-        return RandomAdditiveNoiseAugment(**kwargs)
+        return RandomAdditiveNoiseAugment(kwargs['additive_noise_snr'])
     elif augment_type in ['pitch_dropout']:
-        return PitchDropout(**kwargs)
+        return PitchDropout(kwargs['t_ms'])
     else:
         raise RuntimeError(f'Unknown augment_type = {augment_type}')
 
-
-
 def augmentation_factory(args, noise_dataset=None):
+    if len(args.augment_type) > 1:
+        aug_args = {"bandreject_scaler" : args.bandreject_scaler,
+                    "pitch_quick": args.augment_type == 'pitch_quick',
+                    "t_ms": args.t_ms,
+                    "noise_dataset": noise_dataset,
+                    "additive_noise_snr": args.additive_noise_snr}
+        return CombinedTransforms(args.augment_type, **aug_args)
+    else:
+        args.augment_type = args.augment_type[0]
     if not args.augment_type or args.augment_type == 'none':
         return None
     elif args.augment_type == 'bandreject':
