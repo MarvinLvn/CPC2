@@ -270,7 +270,11 @@ def get_augment(augment_type, **kwargs):
         raise RuntimeError(f'Unknown augment_type = {augment_type}')
 
 def augmentation_factory(args, noise_dataset=None):
-    if args.augment_type is not None and len(args.augment_type) > 1:
+
+    if not args.augment_type or args.augment_type == 'none':
+        return None
+
+    if len(args.augment_type) > 1:
         aug_args = {"bandreject_scaler" : args.bandreject_scaler,
                     "pitch_quick": args.augment_type == 'pitch_quick',
                     "t_ms": args.t_ms,
@@ -280,9 +284,7 @@ def augmentation_factory(args, noise_dataset=None):
     else:
         args.augment_type = args.augment_type[0]
 
-    if not args.augment_type or args.augment_type == 'none':
-        return None
-    elif args.augment_type == 'bandreject':
+    if args.augment_type == 'bandreject':
         return BandrejectAugment(scaler=args.bandreject_scaler)
     elif args.augment_type in ['pitch', 'pitch_quick']:
         return PitchAugment(quick=args.augment_type == 'pitch_quick')
