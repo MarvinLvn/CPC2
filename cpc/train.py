@@ -26,7 +26,7 @@ from cpc.criterion.research import CPCBertCriterion, DeepEmbeddedClustering, \
 from cpc.distributed_training.distributed_mode import init_distributed_mode
 from cpc.data_augmentation import augmentation_factory
 
-
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 def get_size_graph(var):
 
