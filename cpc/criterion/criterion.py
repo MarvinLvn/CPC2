@@ -138,8 +138,7 @@ class PredictionNetwork(nn.Module):
                     buildTransformerAR(dimOutputEncoder,
                                        nLayers=1,
                                        sizeSeq=sizeInputSeq,
-                                       abspos=False,
-                                       top_k_attention=transformer_pruning))
+                                       abspos=False))
             else:
                 self.predictors.append(
                     nn.Linear(dimOutputAR, dimOutputEncoder, bias=False))
