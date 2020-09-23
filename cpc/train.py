@@ -504,7 +504,7 @@ def main(argv):
     seqNoise = None
     noiseDataset = None
 
-    if args.pathDBNoise is not None:
+    if args.pathDBNoise is not None and (args.augment_past or args.augment_future):
         seqNoise, _ = findAllSeqs(args.pathDBNoise,
                                    extension=args.noise_extension,
                                    loadCache=not args.ignore_cache,

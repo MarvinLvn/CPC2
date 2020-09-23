@@ -271,7 +271,7 @@ def get_augment(augment_type, **kwargs):
 
 def augmentation_factory(args, noise_dataset=None):
 
-    if not args.augment_type or args.augment_type == 'none':
+    if not args.augment_type or args.augment_type == 'none' or not (args.augment_past or args.augment_future):
         return None
 
     if len(args.augment_type) > 1:
