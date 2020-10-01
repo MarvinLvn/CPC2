@@ -9,6 +9,7 @@ import time
 import tqdm
 import torch
 import statistics
+import numpy as np
 from pathlib import Path
 from copy import deepcopy
 from torch.multiprocessing import Pool
@@ -31,7 +32,8 @@ class AudioBatchData(Dataset):
                  transform=None,
                  augment_past=False,
                  augment_future=False,
-                 augmentation=None):
+                 augmentation=None,
+                 keep_temporality=True):
         """
         Args:
             - path (string): path to the training dataset
@@ -56,6 +58,8 @@ class AudioBatchData(Dataset):
         self.seqNames = [(s, self.dbPath / x) for s, x in seqNames]
         self.reload_pool = Pool(nProcessLoader)
         self.transform = transform
+        self.keep_temporality = keep_temporality
+
 
         self.prepare()
         self.speakers = list(range(nSpeakers))
@@ -74,7 +78,6 @@ class AudioBatchData(Dataset):
         self.augment_past = augment_past
         self.augment_future = augment_future
         self.augmentation = augmentation
-
 
     def resetPhoneLabels(self, newPhoneLabels, step):
         self.phoneSize = step
@@ -100,7 +103,22 @@ class AudioBatchData(Dataset):
             del self.seqLabel
 
     def prepare(self):
-        random.shuffle(self.seqNames)
+        if self.keep_temporality:
+            # We shuffle sequences but keeping set of sequences that happen in the same session
+            seqNames_by_blocks = []
+            curr_seq_id = None
+            for seq_id, seq_path in self.seqNames:
+                if curr_seq_id != seq_id:
+                    seqNames_by_blocks.append([(seq_id, seq_path)])
+                    curr_seq_id = seq_id
+                else:
+                    seqNames_by_blocks[-1].append((seq_id, seq_path))
+            random.shuffle(seqNames_by_blocks)
+            self.seqNames = [item for sublist in seqNames_by_blocks for item in sublist]
+        else:
+            # We shuffle sequences in random order
+            random.shuffle(self.seqNames)
+
         start_time = time.time()
 
         print("Checking length...")
@@ -149,9 +167,7 @@ class AudioBatchData(Dataset):
         self.r = self.reload_pool.map_async(loadFile,
                                             self.seqNames[seqStart:seqEnd])
 
-
     def parseNextDataBlock(self):
-
         # Labels
         self.speakerLabel = [0]
         self.seqLabel = [0]
@@ -164,7 +180,6 @@ class AudioBatchData(Dataset):
         tmpData = []
 
         for speaker, seqName, seq in self.nextData:
-
             while self.speakers[indexSpeaker] < speaker:
                 indexSpeaker += 1
                 self.speakerLabel.append(speakerSize)
@@ -246,15 +261,22 @@ class AudioBatchData(Dataset):
             return SameSpeakerSampler(batchSize, self.seqLabel,
                                       self.sizeWindow, offset,
                                       balance_sampler=balance_sampler)
+        if type == "temporalsamespeaker":
+            return TemporalSameSpeakerSampler(batchSize, self.speakerLabel,
+                                      self.sizeWindow, offset, balance_sampler=balance_sampler)
         if type == "sequential":
             return SequentialSampler(len(self.data), self.sizeWindow,
                                      offset, batchSize)
-        sampler = UniformAudioSampler(len(self.data), self.sizeWindow,
+
+        if type == "uniform":
+            sampler = UniformAudioSampler(len(self.data), self.sizeWindow,
                                       offset)
-        return BatchSampler(sampler, batchSize, True)
+            return BatchSampler(sampler, batchSize, True)
+
+        raise ValueError("--samplingType should belong to %s" % ["samespeaker", "samesequence", "temporalsamespeaker", "sequential", "uniform"])
 
     def getDataLoader(self, batchSize, type, randomOffset, numWorkers=0,
-                      onLoop=-1, nLoops = -1, balance_sampler=None):
+                      onLoop=-1, nLoops = -1, balance_sampler=None, remove_artefacts=False):
         r"""
         Get a batch sampler for the current dataset.
         Args:
@@ -280,12 +302,19 @@ class AudioBatchData(Dataset):
             nLoops = len(self.packageIndex)
 
         def samplerCall():
-            offset = random.randint(0, self.sizeWindow // 2) \
-                if randomOffset else 0
+            if randomOffset:
+                if type == "temporalsamespeaker":
+                    # We sample the whole batch at once
+                    offset = random.randint(0, self.sizeWindow * batchSize // 2)
+                else:
+                    # We sample sequence per sequence
+                    offset = random.randint(0, self.sizeWindow // 2)
+            else:
+                offset = 0
             return self.getBaseSampler(type, batchSize, offset, balance_sampler)
 
         return AudioLoader(self, samplerCall, nLoops, self.loadNextPack,
-                           totSize, numWorkers)
+                           totSize, numWorkers, remove_artefacts)
 
 
 def loadFile(data):
@@ -326,7 +355,8 @@ class AudioLoader(object):
                  nLoop,
                  updateCall,
                  size,
-                 numWorkers):
+                 numWorkers,
+                 remove_artefacts = False):
         r"""
         Args:
             - dataset (AudioBatchData): target dataset
@@ -342,23 +372,126 @@ class AudioLoader(object):
         self.size = size
         self.dataset = dataset
         self.numWorkers = numWorkers
+        self.remove_artefacts = remove_artefacts
 
     def __len__(self):
         return self.size
 
     def get_data_loader(self):
         sampler = self.samplerCall()
+        if self.remove_artefacts:
+            sampler = self.__remove_artefacts(sampler)
         return DataLoader(self.dataset,
-                                batch_sampler=sampler,
-                                num_workers=self.numWorkers)
+                          batch_sampler=sampler,
+                          num_workers=self.numWorkers)
+
+    def __remove_artefacts(self, sampler):
+        """
+        Loop through the batches built by the sampler and shift all sequences to remove artefacts.
+        Return a sampler object whose batches have been modified.
+
+        If the sampler is an instance of the TemporalSameSpeakerSampler class,
+        make sure to shift all the sequences so that we don't create overlap between
+        the sequences.
+        """
+        seqLabels = self.dataset.seqLabel
+        windowSize = self.dataset.sizeWindow
+        new_batches = []
+        for batch in sampler.batches:
+            new_batch = []
+            # The offset variable will save the number of frames
+            # the sequences must be shifted to ensure no overlap
+            # is introduced when applying temporalsamespeaker sampling
+            offset = 0
+            for beg_seq in batch:
+                beg_seq += offset
+                for i in range(1, len(seqLabels)):
+                    if seqLabels[i-1] <= beg_seq < seqLabels[i]:
+                        if beg_seq + windowSize > seqLabels[i]:
+                            new_batch.append(seqLabels[i])
+                            if isinstance(sampler, TemporalSameSpeakerSampler):
+                                offset += seqLabels[i] - beg_seq
+                        else:
+                            new_batch.append(beg_seq)
+            if isinstance(sampler, TemporalSameSpeakerSampler) and new_batch[-1] > self.dataset.seqLabel[-1]:
+                # We make sure that we don't go out of range
+                new_batch[-1] = self.dataset.seqLabel[-1]-windowSize
+            new_batches.append(new_batch)
+        sampler.batches = new_batches
+        return sampler
 
     def __iter__(self):
-
         for i in range(self.nLoop):
             dataloader = self.get_data_loader()
 
             for x in dataloader:
                 yield x
+            if i < self.nLoop - 1:
+                self.updateCall()
+
+    # Debug functions
+    def get_data_loader_verbose(self):
+        """
+        Verbose version of the get_data_loader function.
+        Look for the name of the audio sequences and check if any artefacts
+        have been created in the sampling process.
+
+        Should only be used for debug purposes
+        """
+        def find_audio_name(seqLabels, seqNames, beg_seq):
+            artefact_created = False
+            for i in range(1, len(seqLabels)):
+                if seqLabels[i-1] <= beg_seq < seqLabels[i]:
+                    if beg_seq + self.dataset.sizeWindow > seqLabels[i]:
+                        artefact_created = True
+                    return seqNames[i-1], artefact_created
+            raise ValueError("I got beg_seq = %s but my seqLabels is %s " % (beg_seq, seqLabels))
+
+        sampler = self.samplerCall()
+
+        if self.remove_artefacts:
+            sampler = self.__remove_artefacts(sampler)
+
+        seqLabels = self.dataset.seqLabel
+        seqNames = self.dataset.getSeqNames()
+        windowSize = self.dataset.sizeWindow
+        sampler_names = []
+        sampler_artefacts = []
+        for batch in sampler.batches:
+            batch_names = []
+            artefacts_created = []
+            beg_seq_prev = -windowSize
+            for beg_seq in batch:
+                if beg_seq_prev + windowSize > beg_seq and isinstance(sampler, TemporalSameSpeakerSampler):
+                    raise ValueError("Overlap detected [%d,%d] with [%d,%d]" % (beg_seq_prev, beg_seq_prev+windowSize,
+                                                                                beg_seq, beg_seq+windowSize))
+                batch_name, artefact_created = find_audio_name(seqLabels, seqNames, beg_seq)
+                batch_names.append(batch_name)
+                artefacts_created.append(artefact_created)
+                beg_seq_prev = beg_seq
+            sampler_names.append(batch_names)
+            sampler_artefacts.append(artefacts_created)
+
+        return DataLoader(self.dataset,
+                          batch_sampler=sampler,
+                          num_workers=self.numWorkers), sampler_names, sampler_artefacts
+
+    def iter_verbose(self):
+        """
+        Verbose iter function. Instead of returing the (sequences, labels) tuple, it will return the following :
+                    ( (sequences,labels), sequences_names, sequences_has_artefact )
+        where :
+            sequences_names contain the path to the audio the sequences have been drawn from
+            sequences_has_artefact indicates if the sequences contain an artefact (2 sequences from 2
+                different recordings that have been concatenated)
+
+        Should only be used for debug purposes
+        """
+        for i in range(self.nLoop):
+            dataloader, sampler_names, sampler_artefacts = self.get_data_loader_verbose()
+            for i, x in enumerate(dataloader):
+                yield x, sampler_names[i], sampler_artefacts[i]
+
             if i < self.nLoop - 1:
                 self.updateCall()
 
@@ -404,6 +537,87 @@ class SequentialSampler(Sampler):
     def __len__(self):
         return self.len
 
+class TemporalSameSpeakerSampler(Sampler):
+
+    def __init__(self,
+                 batchSize,
+                 samplingIntervals,
+                 sizeWindow,
+                 offset,
+                 balance_sampler=None):
+        self.samplingIntervals = samplingIntervals
+        self.sizeWindow = sizeWindow
+        self.batchSize = batchSize
+        self.offset = offset
+        self.balance_sampler = balance_sampler
+
+        if self.samplingIntervals[0] != 0:
+            raise AttributeError("Sampling intervals should start at zero")
+
+        nWindows = len(self.samplingIntervals) - 1
+        # One batch will be of size : self.sizeWindow * self.batchSize
+        # And one batch will be made of consecutive chunks of audios
+        self.sizeSamplers = [(self.samplingIntervals[i+1] -
+                              self.samplingIntervals[i]) // (self.sizeWindow * self.batchSize)
+                             for i in range(nWindows)]
+        if self.offset > 0:
+            self.sizeSamplers = [max(0, x - 1) for x in self.sizeSamplers]
+
+        self.build_batches()
+
+    def __len__(self):
+        return len(self.batches)
+
+    def getIndices(self, x, iInterval):
+        beg = self.offset + x * self.sizeWindow * self.batchSize \
+              + self.samplingIntervals[iInterval]
+        # I compared range with np.arange, and the first one is so much faster
+        return range(beg, beg + self.sizeWindow * self.batchSize, self.sizeWindow)
+
+
+    def __iter__(self):
+        if self.balance_sampler is not None:
+            self.build_batches()
+        random.shuffle(self.batches)
+        return iter(self.batches)
+
+    def build_batches(self):
+        if self.balance_sampler is not None:
+            order = self.get_balanced_sampling()
+        else:
+            order = [(x, torch.randperm(val).tolist())
+                     for x, val in enumerate(self.sizeSamplers) if val > 0]
+
+        # Build Batches
+        self.batches = []
+        for indexSampler, randperm in order:
+            indexStart, sizeSampler = 0, len(randperm)
+            while indexStart < sizeSampler:
+                indexEnd = min(sizeSampler, indexStart + self.batchSize)
+                for x in randperm[indexStart:indexEnd]:
+                    locBatch = self.getIndices(x, indexSampler)
+                    self.batches.append(locBatch)
+                indexStart = indexEnd
+
+    def get_balanced_sampling(self):
+        # untested
+        target_weights = self.balance_sampler(self.sizeSamplers)
+        order = []
+        for x, val in enumerate(self.sizeSamplers):
+            if val <= 0:
+                continue
+            to_take = target_weights[x] #int(target_val *self.balance_coeff + (1-self.balance_coeff) * val)
+            took = 0
+            speaker_batch = []
+            while took < to_take:
+                remainer = to_take - took
+                batch = torch.randperm(val).tolist()
+                if remainer < val:
+                    batch = batch[:remainer]
+                took+= len(batch)
+                speaker_batch+= batch
+            order.append((x,speaker_batch))
+        return order
 
 class SameSpeakerSampler(Sampler):
 
@@ -427,7 +641,6 @@ class SameSpeakerSampler(Sampler):
         self.sizeSamplers = [(self.samplingIntervals[i+1] -
                               self.samplingIntervals[i]) // self.sizeWindow
                              for i in range(nWindows)]
-
         if self.offset > 0:
             self.sizeSamplers = [max(0, x - 1) for x in self.sizeSamplers]
         self.build_batches()
@@ -494,6 +707,7 @@ def findAllSeqs(dirName,
                 extension='.flac',
                 loadCache=False,
                 speaker_level=1,
+                format=None,
                 cache_path=None):
     r"""
     Lists all the sequences with the given extension in the dirName directory.
@@ -545,6 +759,11 @@ def findAllSeqs(dirName,
     prefixSize = len(dirName)
     speakersTarget = {}
     outSequences = []
+
+    outSequencesIds = []
+    outIds = []
+    idsTarget= {}
+
     for root, dirs, filenames in tqdm.tqdm(os.walk(dirName)):
         filtered_files = [f for f in filenames if f.endswith(extension)]
 
@@ -554,18 +773,45 @@ def findAllSeqs(dirName,
             if speakerStr not in speakersTarget:
                 speakersTarget[speakerStr] = len(speakersTarget)
             speaker = speakersTarget[speakerStr]
+
             for filename in filtered_files:
                 full_path = os.path.join(root[prefixSize:], filename)
                 outSequences.append((speaker, full_path))
+                if format == "id_spkr_onset_offset":
+                    idStr = '_'.join(filename.split('_')[0:-2])
+                    if idStr not in idsTarget:
+                        idsTarget[idStr] = len(idsTarget)
+                        outIds.append(idStr)
+                    outSequencesIds.append((idsTarget[idStr], full_path))
     outSpeakers = [None for x in speakersTarget]
     for key, index in speakersTarget.items():
         outSpeakers[index] = key
-    try:
-        torch.save((outSequences, outSpeakers), cache_path)
-        print(f'Saved cache file at {cache_path}')
-    except OSError as err:
-        print(f'Ran in an error while saving {cache_path}: {err}')
-    return outSequences, outSpeakers
+
+    # For same speaker temporal sampling
+    if format == "id_spkr_onset_offset":
+        # We sort by onset
+        def get_id_spkr_onset(x):
+            # Returns (id_spkr, onset) tuple
+            filename = x[1]
+            splitted = filename.split('_')
+            return '_'.join(splitted[0:-2]), float(splitted[-2])
+
+        outSequencesIds = sorted(outSequencesIds, key=get_id_spkr_onset)
+        try:
+            torch.save((outSequencesIds, outIds), cache_path)
+            print(f'Saved cache file at {cache_path}')
+        except OSError as err:
+            print(f'Ran in an error while saving {cache_path}: {err}')
+        return outSequencesIds, outIds
+    # For any other type of sampling
+    else:
+        try:
+            torch.save((outSequences, outSpeakers), cache_path)
+            print(f'Saved cache file at {cache_path}')
+        except OSError as err:
+            print(f'Ran in an error while saving {cache_path}: {err}')
+        return outSequences, outSpeakers
+
 
 
 def parseSeqLabels(pathLabels):

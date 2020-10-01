@@ -471,28 +471,30 @@ def main(argv):
 
     print(f'CONFIG:\n{json.dumps(vars(args), indent=4, sort_keys=True)}')
     print('-' * 50)
-
     seqNames, speakers = findAllSeqs(args.pathDB,
                                      extension=args.file_extension,
                                      loadCache=not args.ignore_cache,
+                                     format=args.naming_convention,
                                      cache_path=args.path_cache)
 
     print(f'Found files: {len(seqNames)} seqs, {len(speakers)} speakers')
+
     # Datasets
     if args.pathTrain is not None:
         seqTrain = filterSeqs(args.pathTrain, seqNames)
     else:
-        seqTrain = seqNames
+        train_nb_files = int(args.train_prop*len(seqNames))
+        seqTrain = seqNames[0:train_nb_files]
 
     if args.pathVal is None:
         print('No validation data specified!')
-        seqVal = []
+        seqVal = seqNames[train_nb_files:]
     else:
         seqVal = filterSeqs(args.pathVal, seqNames)
 
     if args.debug:
-        seqTrain = seqTrain[-10:]
-        seqVal = seqVal[-10:]
+        seqTrain = seqTrain[:1000]
+        seqVal = seqVal[:1000]
 
     phoneLabels, nPhones = None, None
     if args.supervised and args.pathPhone is not None:
@@ -553,7 +555,8 @@ def main(argv):
                                   MAX_SIZE_LOADED=args.max_size_loaded,
                                   augment_future=args.augment_future,
                                   augment_past=args.augment_past,
-                                  augmentation=augmentation_factory(args, noiseDataset))
+                                  augmentation=augmentation_factory(args, noiseDataset),
+                                  keep_temporality=args.naming_convention == "id_spkr_onset_offset")
     print("Training dataset loaded")
     print("")
 
@@ -807,6 +810,16 @@ def parseArgs(argv, defaults=None):
         sys.exit()
 
     assert args.bandreject_scaler >= 0
+
+    if args.samplingType == "temporalsamespeaker" and (args.pathTrain is not None or args.pathVal is not None):
+        raise ValueError("Can not apply temporal sampling (with same speaker) if pathTrain or pathVal is specified.\n"
+                         "This is because temporality must be kept (sequences are loaded in temporal order), and splitting "
+                         "the utterances might break the temporality.")
+
+
+    if args.samplingType == "temporalsamespeaker" and not args.ignore_cache:
+        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True"
+                         "as this mode is not compatible with other sampling methods")
 
     if args.pathCheckpoint is not None:
         args.pathCheckpoint = os.path.abspath(args.pathCheckpoint)

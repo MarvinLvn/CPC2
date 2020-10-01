@@ -43,7 +43,7 @@ def set_default_cpc_config(parser):
                        help='Number of epoch to run')
     group.add_argument('--samplingType', type=str, default='samespeaker',
                        choices=['samespeaker', 'uniform',
-                                'samesequence', 'sequential'],
+                                'samesequence', 'sequential', 'temporalsamespeaker'],
                        help='How to sample the negative examples in the '
                        'CPC loss.')
     group.add_argument('--nLevelsPhone', type=int, default=1,
@@ -127,4 +127,13 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--t_ms', type=int, default=100)
     group_augment.add_argument('--pathDBNoise', type=str, default=None)
     group_augment.add_argument('--pathSeqNoise', type=str, default=None)
+    group_augment.add_argument('--naming_convention', type=str, default=None, choices=[None, 'id_spkr_onset_offset'])
+    group_augment.add_argument('--train_prop', type=float, default=0.9, required=False,
+                               help="Proportion of files belonging to the training set"
+                                    " (only if pathVal and pathTrain are not specified)")
+    group_augment.add_argument('--no_artefacts', action='store_true',
+                               help="Avoid creating artefacts when building batches. "
+                                    "If this option is activated, it will check for each sequence that the latter "
+                                    "remains in one single recording. If not, it will shift the sequence "
+                                    "to avoid creating artefacts.")
     return parser
