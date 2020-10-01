@@ -821,6 +821,10 @@ def parseArgs(argv, defaults=None):
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True"
                          "as this mode is not compatible with other sampling methods")
 
+    if args.samplingType == "temporalsamespeaker" and args.naming_convention != "id_spkr_onset_offset":
+        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention to True"
+                         "as we need the speaker, the onset and the offset of each utterance")
+
     if args.pathCheckpoint is not None:
         args.pathCheckpoint = os.path.abspath(args.pathCheckpoint)
 
