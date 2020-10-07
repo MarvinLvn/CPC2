@@ -94,8 +94,7 @@ def getCriterion(args, downsampling, nSpeakers, nPhones):
                                                        speakerEmbedding=args.speakerEmbedding,
                                                        sizeInputSeq=sizeInputSeq,
                                                        multihead_rnn=args.multihead_rnn,
-                                                       transformer_pruning=args.transformer_pruning,
-                                                       consecutive_negatives=args.consecutive_negatives)
+                                                       transformer_pruning=args.transformer_pruning)
     elif args.pathPhone is not None:
         if not args.CTC:
             cpcCriterion = cr.PhoneCriterion(dimFeatures,

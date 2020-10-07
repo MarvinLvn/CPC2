@@ -136,8 +136,4 @@ def set_default_cpc_config(parser):
                                     "If this option is activated, it will check for each sequence that the latter "
                                     "remains in one single recording. If not, it will shift the sequence "
                                     "to avoid creating artefacts.")
-    group_augment.add_argument('--consecutive_negatives', action='store_true',
-                               help="If set to True, it will sample negative frames consecutively "
-                                    "(by sampling sequences of length equal to --nPredicts). If set to False,"
-                                    "negatives frames will be sampled randomly (default).")
     return parser
