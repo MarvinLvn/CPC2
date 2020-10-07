@@ -232,7 +232,6 @@ def trainStep(dataLoader,
 
         combined = torch.cat([past, future], dim=0)
         label = torch.cat([label, label])
-
         c_feature, encoded_data, label = cpcModel(combined, label)
         c_feature = c_feature[:b, :, :]
         encoded_data = encoded_data[b:, :, :]
@@ -591,7 +590,7 @@ def main(argv):
                                           blockSize=args.nPredicts)
             cpcModel.supervised = args.supervised
         else:
-            cpcModel = model.CPCModel(encoderNet, arNet)
+            cpcModel = model.CPCModel(encoderNet, arNet, args.mask_prob, args.mask_length)
 
     cpcModel.supervised = args.supervised
 

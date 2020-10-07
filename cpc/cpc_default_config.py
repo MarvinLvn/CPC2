@@ -137,7 +137,9 @@ def set_default_cpc_config(parser):
                                     "remains in one single recording. If not, it will shift the sequence "
                                     "to avoid creating artefacts.")
     group_augment.add_argument('--mask_prob', type=float, default=0.0,
-                               help="Probability of creating a mask on the encoded features")
+                               help="Probability of creating a mask on the encoded features "
+                                    "(only supported for CPC models for now).")
     group_augment.add_argument('--mask_length', type=int, default=10,
-                               help="Number of frames a mask will cover")
+                               help="Number of frames a mask will cover "
+                                    "(only supported for CPC models for now).")
     return parser

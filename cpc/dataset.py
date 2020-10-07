@@ -423,7 +423,6 @@ class AudioLoader(object):
     def __iter__(self):
         for i in range(self.nLoop):
             dataloader = self.get_data_loader()
-
             for x in dataloader:
                 yield x
             if i < self.nLoop - 1:

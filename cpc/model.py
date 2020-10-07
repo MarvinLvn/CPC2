@@ -5,7 +5,9 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
-
+import numpy as np
+from typing import Tuple
+import warnings
 import torch
 
 ###########################################
@@ -278,14 +280,108 @@ class CPCModel(nn.Module):
 
     def __init__(self,
                  encoder,
-                 AR):
+                 AR,
+                 mask_prob=0.0,
+                 mask_length=10):
 
         super(CPCModel, self).__init__()
         self.gEncoder = encoder
         self.gAR = AR
+        self.mask_prob = mask_prob
+        self.mask_length = mask_length
+
+        # This would make more sense if the encoded features would be between 0 and 1.
+        # Should think about normalizing
+        self.mask_emb = nn.Parameter(
+            torch.FloatTensor(encoder.dimEncoded).uniform_()
+        )
+
+    def compute_mask_indices(self,
+            shape: Tuple[int, int],
+            mask_prob: float,
+            mask_length: int,
+            min_masks: int = 0,
+    ) -> np.ndarray:
+        """
+        Simplified version of the code that has been implemented for wav2vec 2.0:
+        https://github.com/pytorch/fairseq/blob/master/examples/wav2vec/README.md
+
+        Computes random mask spans for a given shape
+        Args:
+            shape: the shape for which to compute masks.
+                should be of size 2 where first element is batch size and 2nd is timesteps
+            mask_prob: probability for each token to be chosen as start of the span to be masked. this will be multiplied by
+                number of timesteps divided by length of mask span to mask approximately this percentage of all elements.
+                however due to overlaps, the actual number will be smaller
+            mask_length: length of a mask
+            min_masks: minimum number of masked spans
+        """
+        bsz, all_sz = shape
+        mask = np.full((bsz, all_sz), False)
+
+        all_num_mask = int(
+            # add a random number for probabilistic rounding
+            mask_prob * 100 * all_sz / float(mask_length)
+            + np.random.rand()
+        )
+
+        all_num_mask = max(min_masks, all_num_mask)
+
+        mask_idcs = []
+        for i in range(bsz):
+
+            sz = all_sz
+            num_mask = all_num_mask
+
+            lengths = np.full(num_mask, mask_length)
+
+            if sum(lengths) == 0:
+                lengths[0] = min(mask_length, sz - 1)
+
+            min_len = min(lengths)
+            if sz - min_len <= num_mask:
+                min_len = sz - num_mask - 1
+
+            mask_idc = np.random.choice(sz - min_len, num_mask, replace=False)
+            mask_idc = np.asarray(
+                [
+                    mask_idc[j] + offset
+                    for j in range(len(mask_idc))
+                    for offset in range(lengths[j])
+                ]
+            )
+
+            mask_idcs.append(np.unique(mask_idc[mask_idc < sz]))
+
+        min_len = min([len(m) for m in mask_idcs])
+        nb_masked = 0
+        for i, mask_idc in enumerate(mask_idcs):
+            if len(mask_idc) > min_len:
+                mask_idc = np.random.choice(mask_idc, min_len, replace=False)
+            mask[i, mask_idc] = True
+            nb_masked += len(mask_idc)
+
+        percentage_masked = nb_masked / (bsz * all_sz)
+        if percentage_masked > 0.5:
+            warnings.warn("We detected that %.2f of all encoded frames have been masked. This might be too much." % percentage_masked)
+        return mask
+
+    def getMask(self, features):
+        batchSize, seqSize, c = features.shape
+        mask_indices = self.compute_mask_indices((batchSize, seqSize),
+                                                 self.mask_prob,
+                                                 self.mask_length,
+                                                 min_masks=2)
+        mask_indices = torch.from_numpy(mask_indices).to(features.device)
+        features[mask_indices] = self.mask_emb
+        return features
 
     def forward(self, batchData, label):
         encodedData = self.gEncoder(batchData).permute(0, 2, 1)
+
+        if self.mask_prob > 0.0:
+            encodedData = self.getMask(encodedData)
+
         cFeature = self.gAR(encodedData)
         return cFeature, encodedData, label
 
