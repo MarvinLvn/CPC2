@@ -305,7 +305,7 @@ class AudioBatchData(Dataset):
             if randomOffset:
                 if type == "temporalsamespeaker":
                     # We sample the whole batch at once
-                    offset = random.randint(0, self.sizeWindow * batchSize // 2)
+                    offset = random.randint(0, self.sizeWindow * batchSize)
                 else:
                     # We sample sequence per sequence
                     offset = random.randint(0, self.sizeWindow // 2)
