@@ -347,7 +347,8 @@ def run(trainDataset,
         scheduler,
         logs,
         adversarial,
-        clustering):
+        clustering,
+        no_artefacts):
 
     print(f"Running {nEpoch} epochs")
     startEpoch = len(logs["epoch"])
@@ -384,7 +385,8 @@ def run(trainDataset,
 
         trainLoader = trainDataset.getDataLoader(batchSize, samplingMode,
                                                  True, numWorkers=0,
-                                                 balance_sampler=balance_sampler)
+                                                 balance_sampler=balance_sampler,
+                                                 remove_artefacts=no_artefacts)
 
         valLoader = valDataset.getDataLoader(batchSize, 'sequential', False,
                                              numWorkers=0) if valDataset else []
@@ -557,6 +559,7 @@ def main(argv):
                                   augment_past=args.augment_past,
                                   augmentation=augmentation_factory(args, noiseDataset),
                                   keep_temporality=args.naming_convention == "id_spkr_onset_offset")
+
     print("Training dataset loaded")
     print("")
 
@@ -712,7 +715,8 @@ def main(argv):
         scheduler,
         logs,
         adversarial,
-        clustering)
+        clustering,
+        args.no_artefacts)
 
 
 def parseArgs(argv, defaults=None):

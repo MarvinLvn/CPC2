@@ -136,4 +136,8 @@ def set_default_cpc_config(parser):
                                     "If this option is activated, it will check for each sequence that the latter "
                                     "remains in one single recording. If not, it will shift the sequence "
                                     "to avoid creating artefacts.")
+    group_augment.add_argument('--mask_prob', type=float, default=0.0,
+                               help="Probability of creating a mask on the encoded features")
+    group_augment.add_argument('--mask_length', type=int, default=10,
+                               help="Number of frames a mask will cover")
     return parser
