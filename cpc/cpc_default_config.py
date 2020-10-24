@@ -70,11 +70,24 @@ def set_default_cpc_config(parser):
     group.add_argument('--adversarial', action='store_true',
                        help="(Depreciated) Activate the speaker adversarial "
                        "training.")
-    group.add_argument('--speakerEmbedding', type=int, default=0,
-                       help="(Depreciated) Feed the prediction network with "
-                       "speaker embeddings along with the usual sequence.")
+    group.add_argument('--speakerEmbedding', type=str, default=None,
+                       help="(Optional) Path to the frame-level speaker embeddings files that will "
+                            "be fed to the prediction network with "
+                            "speaker embeddings along with the usual sequence (.npy format)")
+    group.add_argument('--speakerEmbeddingStep', type=int, default=160,
+                       help="Step used for the speaker embeddings in number of frames. "
+                            "Should be equal to the step used in the encoded representations. "
+                            "Default to 160 frames = 10 ms (if --speakerEmbedding is activated)")
+    group.add_argument('--size_speaker_emb', type=int, default=512,
+                       help="Feature size of the speaker embedding (if --speakerEmbedding is activated)")
+    group.add_argument('--dout_speaker_emb', type=int, default=0,
+                       help="If > 0, will add a linear layer on top of the speaker embeddings of size "
+                            "--dout_speaker_emb before concatenating the resulting representations "
+                            "to the context-dependent representations (c). If == 0, will concatenate "
+                            "the speaker embeddings directly to the context-dependent reprensentations."
+                            "(if --speakerEmbedding is activated).")
     group.add_argument('--arMode', default='LSTM',
-                       choices=['GRU', 'LSTM', 'RNN', 'no_ar', 'transformer'],
+                       choices=['GRU', 'LSTM', ' ', 'no_ar', 'transformer'],
                        help="Architecture to use for the auto-regressive "
                        "network (default is lstm).")
     group.add_argument('--nLevelsGRU', type=int, default=1,

@@ -65,15 +65,14 @@ class MultiHeadPredictionNetwork(nn.Module):
                                                         nLayers=1,
                                                         sizeSeq=sizeInputSeq,
                                                         abspos=False,
-                                                        nHeads=nPredicts,
-                                                        top_k_attention=transformer_pruning)
+                                                        nHeads=nPredicts)
         elif rnnMode == 'transformer_adaptive_span':
             from .research import TransformerAdaptiveSeq
             self.predictor = TransformerAdaptiveSeq(dimOutputEncoder,
                                                     1,
                                                     sizeInputSeq,
                                                     nPredicts,
-                                                    adaptive_span_params={'adapt_span_loss':adapt_span_loss})
+                                                    adaptive_span_params={'adapt_span_loss': adapt_span_loss})
         else:
             raise ValueError(f"unknown mode {rnnMode}")
 
@@ -88,6 +87,7 @@ class MultiHeadPredictionNetwork(nn.Module):
             if self.dropout is not None:
                 locC = self.dropout(locC)
             locC = locC.view(locC.size(0), 1, locC.size(1), locC.size(2))
+
             outK = (locC*candidates[k]).mean(dim=3)
             out.append(outK)
         return out
@@ -189,16 +189,20 @@ class NoneCriterion(BaseCriterion):
             torch.zeros(1, 1, device=cFeature.device)
 
 
-class SpeakerNormalization(nn.Module):
+class SpeakerEmbeddingConcatenator(nn.Module):
 
-    def __init__(self, embedding_dim, n_speakers):
-        super(SpeakerNormalization, self).__init__()
-        self.emb = nn.Embedding(n_speakers, embedding_dim)
+    def __init__(self,
+                 din=512,
+                 dout=0):
+        super(SpeakerEmbeddingConcatenator, self).__init__()
+        self.dout = dout
+        if dout > 0:
+            self.linear_layer = nn.Linear(din, dout, bias=True)
 
-    def forward(self, x, speaker_labels):
-
-        e = self.emb(speaker_labels)
-        return torch.cat([x, e], dim=2)
+    def forward(self, x, speaker_embedding):
+        if self.dout > 0:
+            speaker_embedding = self.linear_layer(speaker_embedding)
+        return torch.cat([x, speaker_embedding], dim=2)
 
 
 class CPCUnsupersivedCriterion(BaseCriterion):
@@ -211,19 +215,23 @@ class CPCUnsupersivedCriterion(BaseCriterion):
                  mode=None,
                  rnnMode=False,
                  dropout=False,
-                 speakerEmbedding=0,
+                 speakerEmbedding=None,
                  nSpeakers=0,
                  sizeInputSeq=116,
                  multihead_rnn=False,
-                 transformer_pruning=0):
+                 transformer_pruning=0,
+                 size_speaker_emb=512,
+                 dout_speaker_emb=0):
 
         super(CPCUnsupersivedCriterion, self).__init__()
-        if speakerEmbedding > 0:
+
+        if speakerEmbedding is not None:
             print(
-                f"Using {speakerEmbedding} speaker embeddings for {nSpeakers} speakers")
-            self.speaker_norm = SpeakerNormalization(speakerEmbedding, nSpeakers)
+                f"Using speaker embeddings from {speakerEmbedding}")
+            self.speaker_emb_concatenator = SpeakerEmbeddingConcatenator(size_speaker_emb, dout_speaker_emb)
+            dimOutputAR += size_speaker_emb if dout_speaker_emb == 0 else dout_speaker_emb
         else:
-            self.speaker_norm = None
+            self.speaker_emb_concatenator = None
 
         if multihead_rnn:
             print("Activating multi-head rnn")
@@ -299,12 +307,11 @@ class CPCUnsupersivedCriterion(BaseCriterion):
     def getInnerLoss(self):
         return "orthoLoss", self.orthoLoss * self.wPrediction.orthoCriterion()
 
-
-    def getPrediction(self, cFeature, encodedData, label):
-
+    def getPrediction(self, cFeature, encodedData, label, speaker_embedding):
         if self.mode == "reverse":
             encodedData = torch.flip(encodedData, [1])
             cFeature = torch.flip(cFeature, [1])
+            speaker_embedding = torch.flip(speaker_embedding, [1])
 
         batchSize, seqSize, dimAR = cFeature.size()
         windowSize = seqSize - self.nPredicts
@@ -312,9 +319,10 @@ class CPCUnsupersivedCriterion(BaseCriterion):
 
         sampledData, labelLoss = self.sampleClean(encodedData, windowSize)
 
-        if self.speaker_norm is not None:
-            l_ = label.view(batchSize, 1).expand(batchSize, windowSize)
-            cFeature = self.speaker_norm(cFeature, l_)
+        if self.speaker_emb_concatenator is not None:
+            speaker_embedding = speaker_embedding[:, :windowSize]
+            # Concatenate speaker embeddings to context-dependent representations
+            cFeature = self.speaker_emb_concatenator(cFeature, speaker_embedding)
 
         return self.wPrediction(cFeature, sampledData), labelLoss
 
@@ -344,13 +352,11 @@ class CPCUnsupersivedCriterion(BaseCriterion):
 
         return self.wPrediction(cFeature, out)
 
-
-
-    def forward(self, cFeature, encodedData, label):
+    def forward(self, cFeature, encodedData, label, speaker_embedding):
 
         batchSize, seqSize, _ = cFeature.size()
         windowSize = seqSize - self.nPredicts
-        predictions, labelLoss = self.getPrediction(cFeature, encodedData, label)
+        predictions, labelLoss = self.getPrediction(cFeature, encodedData, label, speaker_embedding)
         outLosses = [0 for x in range(self.nPredicts)]
         outAcc = [0 for x in range(self.nPredicts)]
 

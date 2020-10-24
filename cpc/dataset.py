@@ -19,6 +19,7 @@ from torch.utils.data.sampler import Sampler, BatchSampler
 
 import torchaudio
 
+
 class AudioBatchData(Dataset):
 
     def __init__(self,
@@ -33,7 +34,9 @@ class AudioBatchData(Dataset):
                  augment_past=False,
                  augment_future=False,
                  augmentation=None,
-                 keep_temporality=True):
+                 keep_temporality=True,
+                 speaker_embedding=None,
+                 speaker_embedding_step=0.01):
         """
         Args:
             - path (string): path to the training dataset
@@ -43,7 +46,7 @@ class AudioBatchData(Dataset):
                                              following entries
 
                                              "step": size of a labelled window
-                                             "$SEQ_NAME": list of phonem labels for
+                                             "$SEQ_NAME": list of phoneme labels for
                                              the sequence $SEQ_NAME
            - nSpeakers (int): number of speakers to expect.
            - nProcessLoader (int): number of processes to call when loading the
@@ -56,19 +59,31 @@ class AudioBatchData(Dataset):
         self.dbPath = Path(path)
         self.sizeWindow = sizeWindow
         self.seqNames = [(s, self.dbPath / x) for s, x in seqNames]
+        if speaker_embedding is not None:
+            self.speaker_embedding = Path(speaker_embedding)
+            self.spkrEmbNames = [self.speaker_embedding / x.replace('.wav', '.npy') for s, x in seqNames]
+        else:
+            self.speaker_embedding = None
+            self.spkrEmbNames = [None]*len(self.seqNames)
+
         self.reload_pool = Pool(nProcessLoader)
         self.transform = transform
         self.keep_temporality = keep_temporality
 
-
         self.prepare()
         self.speakers = list(range(nSpeakers))
         self.data = []
+        self.dataSpkr = []
 
         self.phoneSize = 0 if phoneLabelsDict is None else \
             phoneLabelsDict["step"]
         self.phoneStep = 0 if phoneLabelsDict is None else \
             self.sizeWindow // self.phoneSize
+
+        # Size of the speaker rep in number of frames
+        self.spkrEmbeddingSize = speaker_embedding_step
+        # Number of speaker embeddings in 1 window
+        self.spkrEmbeddingStep = self.sizeWindow // self.spkrEmbeddingSize
 
         self.phoneLabelsDict = deepcopy(phoneLabelsDict)
         self.loadNextPack(first=True)
@@ -119,6 +134,10 @@ class AudioBatchData(Dataset):
             # We shuffle sequences in random order
             random.shuffle(self.seqNames)
 
+        # Let's not forget to keep seqNames and spkrEmbNames aligned
+        if self.speaker_embedding is not None:
+            self.spkrEmbNames = [self.speaker_embedding / os.path.relpath(x, self.dbPath).replace('.wav', '.npy') for s,x in self.seqNames]
+
         start_time = time.time()
 
         print("Checking length...")
@@ -165,7 +184,7 @@ class AudioBatchData(Dataset):
         if self.nextPack == 0 and len(self.packageIndex) > 1:
             self.prepare()
         self.r = self.reload_pool.map_async(loadFile,
-                                            self.seqNames[seqStart:seqEnd])
+                                            zip(self.seqNames[seqStart:seqEnd], self.spkrEmbNames[seqStart:seqEnd]))
 
     def parseNextDataBlock(self):
         # Labels
@@ -178,8 +197,9 @@ class AudioBatchData(Dataset):
         # To accelerate the process a bit
         self.nextData.sort(key=lambda x: (x[0], x[1]))
         tmpData = []
+        tmpDataSpkr = []
 
-        for speaker, seqName, seq in self.nextData:
+        for speaker, seqName, seq, spkr_emb in self.nextData:
             while self.speakers[indexSpeaker] < speaker:
                 indexSpeaker += 1
                 self.speakerLabel.append(speakerSize)
@@ -193,16 +213,23 @@ class AudioBatchData(Dataset):
 
             sizeSeq = seq.size(0)
             tmpData.append(seq)
+            tmpDataSpkr.append(spkr_emb)
             self.seqLabel.append(self.seqLabel[-1] + sizeSeq)
             speakerSize += sizeSeq
             del seq
+            del spkr_emb
 
         self.speakerLabel.append(speakerSize)
         self.data = torch.cat(tmpData, dim=0)
+        self.data_spkr_emb = torch.cat(tmpDataSpkr, dim=0)
 
     def getPhonem(self, idx):
         idPhone = idx // self.phoneSize
         return self.phoneLabels[idPhone:(idPhone + self.phoneStep)]
+
+    def getSpkrEmb(self, idx):
+        spkrEmb = idx // self.spkrEmbeddingSize
+        return self.data_spkr_emb[spkrEmb:(spkrEmb + self.spkrEmbeddingStep)]
 
     def getSpeakerLabel(self, idx):
         idSpeaker = next(x[0] for x in enumerate(
@@ -213,11 +240,11 @@ class AudioBatchData(Dataset):
         return self.totSize // self.sizeWindow
 
     def __getitem__(self, idx):
-
         if idx < 0 or idx >= len(self.data) - self.sizeWindow - 1:
             print(idx)
-
         outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
+        outDataSpkrEmb = self.getSpkrEmb(idx)
+
         label = torch.tensor(self.getSpeakerLabel(idx), dtype=torch.long)
         if self.phoneSize > 0:
             label_phone = torch.tensor(self.getPhonem(idx), dtype=torch.long)
@@ -239,9 +266,9 @@ class AudioBatchData(Dataset):
         outData = torch.cat([x1, x2], dim=0)
 
         if self.doubleLabels:
-            return outData, label, label_phone
+            return outData, label, label_phone, outDataSpkrEmb
 
-        return outData, label
+        return outData, label, outDataSpkrEmb
 
     def getNSpeakers(self):
         return len(self.speakers)
@@ -318,10 +345,15 @@ class AudioBatchData(Dataset):
 
 
 def loadFile(data):
-    speaker, fullPath = data
+    seq_info, spkr_emb_path = data
+    speaker, fullPath = seq_info
     seqName = fullPath.stem
     seq = torchaudio.load(fullPath)[0].mean(dim=0)
-    return speaker, seqName, seq
+    if spkr_emb_path is not None:
+        spkr_emb = torch.from_numpy(np.load(spkr_emb_path)).to(seq.device)
+    else:
+        spkr_emb = torch.empty(0)
+    return speaker, seqName, seq, spkr_emb
 
 
 class PeakNorm(object):
@@ -330,6 +362,7 @@ class PeakNorm(object):
         #Input Size: C x L
         max_val = x.abs().max(dim=1, keepdim=True)[0]
         return x / (max_val + 1e-8)
+
 
 class ComposeTransform(object):
 
@@ -494,6 +527,7 @@ class AudioLoader(object):
             if i < self.nLoop - 1:
                 self.updateCall()
 
+
 class UniformAudioSampler(Sampler):
 
     def __init__(self,
@@ -536,6 +570,7 @@ class SequentialSampler(Sampler):
     def __len__(self):
         return self.len
 
+
 class TemporalSameSpeakerSampler(Sampler):
 
     def __init__(self,
@@ -572,7 +607,6 @@ class TemporalSameSpeakerSampler(Sampler):
               + self.samplingIntervals[iInterval]
         # I compared range with np.arange, and the first one is so much faster
         return range(beg, beg + self.sizeWindow * self.batchSize, self.sizeWindow)
-
 
     def __iter__(self):
         if self.balance_sampler is not None:
@@ -617,6 +651,7 @@ class TemporalSameSpeakerSampler(Sampler):
                 speaker_batch+= batch
             order.append((x,speaker_batch))
         return order
+
 
 class SameSpeakerSampler(Sampler):
 
@@ -810,7 +845,6 @@ def findAllSeqs(dirName,
         except OSError as err:
             print(f'Ran in an error while saving {cache_path}: {err}')
         return outSequences, outSpeakers
-
 
 
 def parseSeqLabels(pathLabels):

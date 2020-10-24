@@ -324,7 +324,6 @@ class CPCModel(nn.Module):
             mask_prob * 100 * all_sz / float(mask_length)
             + np.random.rand()
         )
-
         all_num_mask = max(min_masks, all_num_mask)
 
         mask_idcs = []
@@ -343,6 +342,7 @@ class CPCModel(nn.Module):
                 min_len = sz - num_mask - 1
 
             mask_idc = np.random.choice(sz - min_len, num_mask, replace=False)
+
             mask_idc = np.asarray(
                 [
                     mask_idc[j] + offset
@@ -358,6 +358,7 @@ class CPCModel(nn.Module):
         for i, mask_idc in enumerate(mask_idcs):
             if len(mask_idc) > min_len:
                 mask_idc = np.random.choice(mask_idc, min_len, replace=False)
+
             mask[i, mask_idc] = True
             nb_masked += len(mask_idc)
 

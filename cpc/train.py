@@ -70,6 +70,7 @@ def get_size_graph(var):
     print(sizes)
     return len(sizes), sum(sizes)
 
+
 def getCriterion(args, downsampling, nSpeakers, nPhones):
     dimFeatures = args.hiddenGar if not args.onEncoder else args.hiddenEncoder
     if not args.supervised:
@@ -94,7 +95,9 @@ def getCriterion(args, downsampling, nSpeakers, nPhones):
                                                        speakerEmbedding=args.speakerEmbedding,
                                                        sizeInputSeq=sizeInputSeq,
                                                        multihead_rnn=args.multihead_rnn,
-                                                       transformer_pruning=args.transformer_pruning)
+                                                       transformer_pruning=args.transformer_pruning,
+                                                       size_speaker_emb=args.size_speaker_emb,
+                                                       dout_speaker_emb=args.dout_speaker_emb)
     elif args.pathPhone is not None:
         if not args.CTC:
             cpcCriterion = cr.PhoneCriterion(dimFeatures,
@@ -224,7 +227,7 @@ def trainStep(dataLoader,
     logs, lastlogs = {}, None
     iter = 0
     for step, full_data in enumerate(dataLoader):
-        sequence, label = [x.cuda(non_blocking=True) for x in full_data]
+        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
 
         b = past.size(0)
@@ -236,9 +239,10 @@ def trainStep(dataLoader,
         c_feature = c_feature[:b, :, :]
         encoded_data = encoded_data[b:, :, :]
         label =label[:b]
-
-        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
+        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
         totLoss = allLosses.sum()
+        print(totLoss)
+        print(vars(totLoss))
         totLoss.backward()
 
         if clustering is not None:
@@ -296,7 +300,7 @@ def valStep(dataLoader,
     iter = 0
 
     for step, full_data in enumerate(dataLoader):
-        sequence, label = [x.cuda(non_blocking=True) for x in full_data]
+        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
 
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
         label = torch.cat([label, label])
@@ -310,7 +314,7 @@ def valStep(dataLoader,
             encoded_data = encoded_data[b:, ...]
             label =label[:b]
 
-            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
+            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
             if clustering is not None:
                 lossCluster = clustering(c_feature, label)
 
@@ -462,6 +466,9 @@ def main(argv):
             args.loadCriterion = True
     batchSize = args.nGPU * args.batchSizeGPU
 
+    if args.speakerEmbedding is not None and not os.path.exists(args.speakerEmbedding):
+        raise ValueError("%s can't be found. Are you sure you provided the right location ?" % args.speakerEmbedding)
+
     if args.distributed:
         print('Distributed mode, moving to 1 process for data loading')
         args.n_process_loader = 1
@@ -517,8 +524,7 @@ def main(argv):
         if args.debug:
             seqNoise = seqNoise[:100]
 
-        print("")
-        print(f'Loading noise data at {args.pathDBNoise}')
+        print(f'\nLoading noise data at {args.pathDBNoise}')
         print("Loading the noise dataset")
         noiseDataset = AudioBatchData(args.pathDBNoise, args.sizeWindow,
                                        seqNoise, None, 1,
@@ -544,8 +550,7 @@ def main(argv):
             f'Current worker files: {len(seqTrain)} train, {len(seqVal)} val')
 
 
-    print("")
-    print(f'Loading audio data at {args.pathDB}')
+    print(f'\nLoading audio data at {args.pathDB}')
     print("Loading the training dataset")
     trainDataset = AudioBatchData(args.pathDB,
                                   args.sizeWindow,
@@ -557,10 +562,11 @@ def main(argv):
                                   augment_future=args.augment_future,
                                   augment_past=args.augment_past,
                                   augmentation=augmentation_factory(args, noiseDataset),
-                                  keep_temporality=args.naming_convention == "id_spkr_onset_offset")
+                                  keep_temporality=args.naming_convention == "id_spkr_onset_offset",
+                                  speaker_embedding=args.speakerEmbedding,
+                                  speaker_embedding_step=args.speakerEmbeddingStep)
 
-    print("Training dataset loaded")
-    print("")
+    print("Training dataset loaded\n")
 
     if seqVal:
         print("Loading the validation dataset")
@@ -569,7 +575,9 @@ def main(argv):
                                 seqVal,
                                 phoneLabels,
                                 len(speakers),
-                                nProcessLoader=args.n_process_loader)
+                                nProcessLoader=args.n_process_loader,
+                                speaker_embedding=args.speakerEmbedding,
+                                speaker_embedding_step=args.speakerEmbeddingStep)
         print("Validation dataset loaded")
         print("")
     else:
@@ -818,7 +826,6 @@ def parseArgs(argv, defaults=None):
         raise ValueError("Can not apply temporal sampling (with same speaker) if pathTrain or pathVal is specified.\n"
                          "This is because temporality must be kept (sequences are loaded in temporal order), and splitting "
                          "the utterances might break the temporality.")
-
 
     if args.samplingType == "temporalsamespeaker" and not args.ignore_cache:
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True"

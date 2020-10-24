@@ -175,7 +175,6 @@ def buildMultHeadTransformerAR(dimEncoded,    # Output dimension of the encoder
                                abspos,
                                nHeads,
                                top_k_attention=0):
-
     layerSequence = []
     if abspos:
         layerSequence += [StaticPositionEmbedding(sizeSeq, dimEncoded)]

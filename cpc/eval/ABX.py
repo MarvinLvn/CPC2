@@ -93,6 +93,7 @@ def ABX(args,
         divisor_speaker = index_speaker.sum(dim=0).sum(dim=2)
         phone_confusion = reduce_sparse_data(group_confusion.sum(dim=0).sum(dim=2),
                                              divisor_speaker)
+
         scores['across'] = (phone_confusion.sum() /
                              (divisor_speaker > 0).sum()).item()
 
