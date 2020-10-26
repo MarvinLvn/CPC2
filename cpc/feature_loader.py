@@ -197,7 +197,7 @@ def getEncoder(args):
 def getAR(args):
     if args.arMode == 'transformer':
         from .transformers import buildTransformerAR
-        arNet = buildTransformerAR(args.hiddenEncoder, args.nLevelsGRU,
+        arNet = buildTransformerAR(args.hiddenEncoder, args.hiddenGar, args.nLevelsGRU,
                                    args.sizeWindow // 160, args.abspos)
         args.hiddenGar = args.hiddenEncoder
     elif args.cpc_mode == "bert":

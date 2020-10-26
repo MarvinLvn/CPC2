@@ -241,8 +241,6 @@ def trainStep(dataLoader,
         label =label[:b]
         allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
         totLoss = allLosses.sum()
-        print(totLoss)
-        print(vars(totLoss))
         totLoss.backward()
 
         if clustering is not None:

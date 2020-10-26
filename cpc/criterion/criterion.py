@@ -62,6 +62,7 @@ class MultiHeadPredictionNetwork(nn.Module):
             if transformer_pruning > 0:
                 print(f"Activating {transformer_pruning} attention pruning")
             self.predictor = buildMultHeadTransformerAR(dimOutputEncoder,
+                                                        dimOutputAR,
                                                         nLayers=1,
                                                         sizeSeq=sizeInputSeq,
                                                         abspos=False,
@@ -136,6 +137,7 @@ class PredictionNetwork(nn.Module):
                 from cpc.transformers import buildTransformerAR
                 self.predictors.append(
                     buildTransformerAR(dimOutputEncoder,
+                                       dimOutputAR,
                                        nLayers=1,
                                        sizeSeq=sizeInputSeq,
                                        abspos=False))
