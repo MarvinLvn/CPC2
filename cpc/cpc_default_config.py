@@ -155,4 +155,9 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--mask_length', type=int, default=10,
                                help="Number of frames a mask will cover "
                                     "(only supported for CPC models for now).")
+    group_augment.add_argument('--n_choose_amongst', type=int, default=None,
+                               help="Number of sequences that will be first extracted, "
+                                    "and whose cosine distance on their speaker embeddings will be computed."
+                                    "Then the closest sequences will be chosen to build the batch."
+                                    "Should be greater than the batch size.")
     return parser

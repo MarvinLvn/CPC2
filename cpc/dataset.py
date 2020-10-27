@@ -12,11 +12,14 @@ import statistics
 import numpy as np
 from pathlib import Path
 from copy import deepcopy
+from functools import partial
 from torch.multiprocessing import Pool
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import _SingleProcessDataLoaderIter
 from torch.utils.data.sampler import Sampler, BatchSampler
+from scipy.spatial.distance import cdist
 
+import torch.nn as nn
 import torchaudio
 
 
@@ -166,7 +169,7 @@ class AudioBatchData(Dataset):
     def getNPacks(self):
         return len(self.packageIndex)
 
-    def loadNextPack(self, first=False):
+    def loadNextPack(self, first=False, only_spkr_emb=False):
         self.clear()
         if not first:
             self.currentPack = self.nextPack
@@ -183,8 +186,12 @@ class AudioBatchData(Dataset):
         seqStart, seqEnd = self.packageIndex[self.nextPack]
         if self.nextPack == 0 and len(self.packageIndex) > 1:
             self.prepare()
+
         self.r = self.reload_pool.map_async(loadFile,
-                                            zip(self.seqNames[seqStart:seqEnd], self.spkrEmbNames[seqStart:seqEnd]))
+                                            zip(
+                                                self.seqNames[seqStart:seqEnd],
+                                                self.spkrEmbNames[seqStart:seqEnd]
+                                            ))
 
     def parseNextDataBlock(self):
         # Labels
@@ -279,31 +286,37 @@ class AudioBatchData(Dataset):
     def getNLoadsPerEpoch(self):
         return len(self.packageIndex)
 
-    def getBaseSampler(self, type, batchSize, offset, balance_sampler=None):
+    def getBaseSampler(self, type, batchSize, offset, balance_sampler=None,
+                       n_choose_amongst=None):
         if type == "samespeaker":
             return SameSpeakerSampler(batchSize, self.speakerLabel,
                                       self.sizeWindow, offset,
-                                      balance_sampler=balance_sampler)
+                                      balance_sampler=balance_sampler,
+                                      n_choose_amongst=n_choose_amongst)
         if type == "samesequence":
             return SameSpeakerSampler(batchSize, self.seqLabel,
                                       self.sizeWindow, offset,
-                                      balance_sampler=balance_sampler)
+                                      balance_sampler=balance_sampler,
+                                      n_choose_amongst=n_choose_amongst)
         if type == "temporalsamespeaker":
             return TemporalSameSpeakerSampler(batchSize, self.speakerLabel,
-                                      self.sizeWindow, offset, balance_sampler=balance_sampler)
+                                              self.sizeWindow, offset,
+                                              balance_sampler=balance_sampler,
+                                              n_choose_amongst=n_choose_amongst)
         if type == "sequential":
             return SequentialSampler(len(self.data), self.sizeWindow,
                                      offset, batchSize)
 
         if type == "uniform":
             sampler = UniformAudioSampler(len(self.data), self.sizeWindow,
-                                      offset)
+                                          offset)
             return BatchSampler(sampler, batchSize, True)
 
         raise ValueError("--samplingType should belong to %s" % ["samespeaker", "samesequence", "temporalsamespeaker", "sequential", "uniform"])
 
     def getDataLoader(self, batchSize, type, randomOffset, numWorkers=0,
-                      onLoop=-1, nLoops = -1, balance_sampler=None, remove_artefacts=False):
+                      onLoop=-1, nLoops = -1, balance_sampler=None, remove_artefacts=False,
+                      n_choose_amongst=None):
         r"""
         Get a batch sampler for the current dataset.
         Args:
@@ -319,6 +332,11 @@ class AudioBatchData(Dataset):
                 vector
             - randomOffset (bool): if True add a random offset to the sampler
                                    at the begining of each iteration
+            - remove_artefacts : if True, will shift sequences so that no artefact
+                                is created (if temporal_sampling is activated)
+            - n_choose_amongst : if not None, will load n_choose_amongst sequences (only their speaker
+                        embeddings) and will only build the batch with the batchSize
+                        closest sequences.
         """
         totSize = self.totSize // (self.sizeWindow * batchSize)
         if onLoop >= 0:
@@ -338,21 +356,27 @@ class AudioBatchData(Dataset):
                     offset = random.randint(0, self.sizeWindow // 2)
             else:
                 offset = 0
-            return self.getBaseSampler(type, batchSize, offset, balance_sampler)
+            return self.getBaseSampler(type, batchSize, offset, balance_sampler, n_choose_amongst)
 
         return AudioLoader(self, samplerCall, nLoops, self.loadNextPack,
-                           totSize, numWorkers, remove_artefacts)
+                           totSize, numWorkers, remove_artefacts, n_choose_amongst)
 
 
 def loadFile(data):
+    # Load metadata
     seq_info, spkr_emb_path = data
     speaker, fullPath = seq_info
     seqName = fullPath.stem
-    seq = torchaudio.load(fullPath)[0].mean(dim=0)
+
+
+    # Load speaker embedding
     if spkr_emb_path is not None:
-        spkr_emb = torch.from_numpy(np.load(spkr_emb_path)).to(seq.device)
+        spkr_emb = torch.from_numpy(np.load(spkr_emb_path))
     else:
         spkr_emb = torch.empty(0)
+
+    # Load audio
+    seq = torchaudio.load(fullPath)[0].mean(dim=0)
     return speaker, seqName, seq, spkr_emb
 
 
@@ -389,7 +413,8 @@ class AudioLoader(object):
                  updateCall,
                  size,
                  numWorkers,
-                 remove_artefacts = False):
+                 remove_artefacts = False,
+                 n_choose_amongst=None):
         r"""
         Args:
             - dataset (AudioBatchData): target dataset
@@ -406,14 +431,21 @@ class AudioLoader(object):
         self.dataset = dataset
         self.numWorkers = numWorkers
         self.remove_artefacts = remove_artefacts
+        self.n_choose_amongst = n_choose_amongst
 
     def __len__(self):
         return self.size
 
     def get_data_loader(self):
         sampler = self.samplerCall()
+
+        # Remove artefacts
         if self.remove_artefacts:
             sampler = self.__remove_artefacts(sampler)
+
+        # Choose n closest sequences
+        if self.n_choose_amongst is not None:
+            sampler = self.__n_closest_speaker_embeddings(sampler)
         return DataLoader(self.dataset,
                           batch_sampler=sampler,
                           num_workers=self.numWorkers)
@@ -453,6 +485,24 @@ class AudioLoader(object):
         sampler.batches = new_batches
         return sampler
 
+    def __n_closest_speaker_embeddings(self, sampler):
+        # load speaker embedding for every batch
+        # Number of speaker embeddings = number_of_batch * n_choose_amongst
+        # in total, we have n_batch * n_choose_amongst * spkr_emb_nb_feat
+        speaker_embeddings = torch.stack([torch.stack([self.dataset.getSpkrEmb(idx).mean(dim=0) for idx in batch])
+                                          for batch in sampler.batches])
+
+        cos = nn.CosineSimilarity()
+        for i, spkr_emb_batch in enumerate(speaker_embeddings):
+            seq0 = spkr_emb_batch[0].view(1, -1)
+            sim0all = cos(seq0, spkr_emb_batch)
+
+            # Extract sequences that have the highest cosine similarity
+            max_indices = sorted(torch.topk(sim0all, sampler.effectiveBatchSize).indices)
+            sampler.batches[i] = [sampler.batches[i][idx] for idx in max_indices]
+
+        return sampler
+
     def __iter__(self):
         for i in range(self.nLoop):
             dataloader = self.get_data_loader()
@@ -460,6 +510,26 @@ class AudioLoader(object):
                 yield x
             if i < self.nLoop - 1:
                 self.updateCall()
+
+    def __n_closest_speaker_embeddings_verbose(self, sampler):
+        # load speaker embedding for every batch
+        # Number of speaker embeddings = number_of_batch * n_choose_amongst
+        # in total, we have n_batch * n_choose_amongst * spkr_emb_nb_feat
+        speaker_embeddings = torch.stack([torch.stack([self.dataset.getSpkrEmb(idx).mean(dim=0) for idx in batch])
+                                          for batch in sampler.batches])
+
+        cos = nn.CosineSimilarity()
+        cosine_similarities = []
+        for i, spkr_emb_batch in enumerate(speaker_embeddings):
+            seq0 = spkr_emb_batch[0].view(1,-1)
+            sim0all = cos(seq0, spkr_emb_batch)
+
+            # Extract sequences that have the highest cosine similarity
+            max_indices = sorted(torch.topk(sim0all, sampler.effectiveBatchSize).indices)
+            sampler.batches[i] = [sampler.batches[i][idx] for idx in max_indices]
+            cosine_similarities.append(sim0all)
+
+        return sampler, cosine_similarities
 
     # Debug functions
     def get_data_loader_verbose(self):
@@ -484,6 +554,12 @@ class AudioLoader(object):
         if self.remove_artefacts:
             sampler = self.__remove_artefacts(sampler)
 
+        cosine_distances = [None] * len(sampler.batches)
+        # Choose n closest sequences
+        if self.n_choose_amongst is not None:
+            sampler, cosine_distances = self.__n_closest_speaker_embeddings_verbose(sampler)
+
+
         seqLabels = self.dataset.seqLabel
         seqNames = self.dataset.getSeqNames()
         windowSize = self.dataset.sizeWindow
@@ -506,7 +582,7 @@ class AudioLoader(object):
 
         return DataLoader(self.dataset,
                           batch_sampler=sampler,
-                          num_workers=self.numWorkers), sampler_names, sampler_artefacts
+                          num_workers=self.numWorkers), sampler_names, sampler_artefacts, cosine_distances
 
     def iter_verbose(self):
         """
@@ -520,13 +596,12 @@ class AudioLoader(object):
         Should only be used for debug purposes
         """
         for i in range(self.nLoop):
-            dataloader, sampler_names, sampler_artefacts = self.get_data_loader_verbose()
+            dataloader, sampler_names, sampler_artefacts, cosine_distance = self.get_data_loader_verbose()
             for i, x in enumerate(dataloader):
-                yield x, sampler_names[i], sampler_artefacts[i]
+                yield x, sampler_names[i], sampler_artefacts[i], cosine_distance[i]
 
             if i < self.nLoop - 1:
                 self.updateCall()
-
 
 class UniformAudioSampler(Sampler):
 
@@ -538,6 +613,7 @@ class UniformAudioSampler(Sampler):
         self.len = dataSize // sizeWindow
         self.sizeWindow = sizeWindow
         self.offset = offset
+
         if self.offset > 0:
             self.len -= 1
 
@@ -559,6 +635,7 @@ class SequentialSampler(Sampler):
         self.startBatches = [x * (dataSize // batchSize)
                              for x in range(batchSize)]
         self.batchSize = batchSize
+
         if self.offset > 0:
             self.len -= 1
 
@@ -578,12 +655,18 @@ class TemporalSameSpeakerSampler(Sampler):
                  samplingIntervals,
                  sizeWindow,
                  offset,
-                 balance_sampler=None):
+                 balance_sampler=None,
+                 n_choose_amongst=None):
         self.samplingIntervals = samplingIntervals
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
         self.offset = offset
         self.balance_sampler = balance_sampler
+        self.n_choose_amongst = n_choose_amongst
+
+        if self.n_choose_amongst is not None:
+            self.effectiveBatchSize = self.batchSize
+            self.batchSize = self.n_choose_amongst
 
         if self.samplingIntervals[0] != 0:
             raise AttributeError("Sampling intervals should start at zero")
@@ -594,6 +677,7 @@ class TemporalSameSpeakerSampler(Sampler):
         self.sizeSamplers = [(self.samplingIntervals[i+1] -
                               self.samplingIntervals[i]) // (self.sizeWindow * self.batchSize)
                              for i in range(nWindows)]
+
         if self.offset > 0:
             self.sizeSamplers = [max(0, x - 1) for x in self.sizeSamplers]
 
@@ -660,13 +744,19 @@ class SameSpeakerSampler(Sampler):
                  samplingIntervals,
                  sizeWindow,
                  offset,
-                 balance_sampler=None):
+                 balance_sampler=None,
+                 n_choose_amongst=None):
 
         self.samplingIntervals = samplingIntervals
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
         self.offset = offset
         self.balance_sampler = balance_sampler
+        self.n_choose_amongst = n_choose_amongst
+
+        if self.n_choose_amongst is not None:
+            self.effectiveBatchSize = self.batchSize
+            self.batchSize = self.n_choose_amongst
 
         if self.samplingIntervals[0] != 0:
             raise AttributeError("Sampling intervals should start at zero")

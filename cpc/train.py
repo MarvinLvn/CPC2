@@ -349,7 +349,8 @@ def run(trainDataset,
         logs,
         adversarial,
         clustering,
-        no_artefacts):
+        no_artefacts,
+        n_choose_amongst):
 
     print(f"Running {nEpoch} epochs")
     startEpoch = len(logs["epoch"])
@@ -387,7 +388,8 @@ def run(trainDataset,
         trainLoader = trainDataset.getDataLoader(batchSize, samplingMode,
                                                  True, numWorkers=0,
                                                  balance_sampler=balance_sampler,
-                                                 remove_artefacts=no_artefacts)
+                                                 remove_artefacts=no_artefacts,
+                                                 n_choose_amongst=n_choose_amongst)
 
         valLoader = valDataset.getDataLoader(batchSize, 'sequential', False,
                                              numWorkers=0) if valDataset else []
@@ -721,7 +723,8 @@ def main(argv):
         logs,
         adversarial,
         clustering,
-        args.no_artefacts)
+        args.no_artefacts,
+        args.n_choose_amongst)
 
 
 def parseArgs(argv, defaults=None):
@@ -826,12 +829,12 @@ def parseArgs(argv, defaults=None):
                          "the utterances might break the temporality.")
 
     if args.samplingType == "temporalsamespeaker" and not args.ignore_cache:
-        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True"
+        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True "
                          "as this mode is not compatible with other sampling methods")
 
     if args.samplingType == "temporalsamespeaker" and args.naming_convention != "id_spkr_onset_offset":
-        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention to True"
-                         "as we need the speaker, the onset and the offset of each utterance")
+        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
+                         "to id_spkr_onset_offset as we need the speaker, the onset and the offset of each utterance")
 
     if args.pathCheckpoint is not None:
         args.pathCheckpoint = os.path.abspath(args.pathCheckpoint)
