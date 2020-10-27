@@ -229,7 +229,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
 
         if speakerEmbedding is not None:
             print(
-                f"Using speaker embeddings from {speakerEmbedding}")
+                f"Concatenating speaker embeddings from {speakerEmbedding}")
             self.speaker_emb_concatenator = SpeakerEmbeddingConcatenator(size_speaker_emb, dout_speaker_emb)
             dimOutputAR += size_speaker_emb if dout_speaker_emb == 0 else dout_speaker_emb
         else:

@@ -667,6 +667,9 @@ class TemporalSameSpeakerSampler(Sampler):
         if self.n_choose_amongst is not None:
             self.effectiveBatchSize = self.batchSize
             self.batchSize = self.n_choose_amongst
+            print("Will compute the %d closest sequences amongst %d sequences in total.\n"
+                  "Distances will be computed in terms of cosine "
+                  "similarities between speaker embeddings." % (self.effectiveBatchSize, self.batchSize))
 
         if self.samplingIntervals[0] != 0:
             raise AttributeError("Sampling intervals should start at zero")
@@ -757,6 +760,9 @@ class SameSpeakerSampler(Sampler):
         if self.n_choose_amongst is not None:
             self.effectiveBatchSize = self.batchSize
             self.batchSize = self.n_choose_amongst
+            print("Will compute the %d closest sequences amongst %d sequences in total.\n"
+                  "Distances will be computed in terms of cosine "
+                  "similarities between speaker embeddings." % (self.effectiveBatchSize, self.batchSize))
 
         if self.samplingIntervals[0] != 0:
             raise AttributeError("Sampling intervals should start at zero")

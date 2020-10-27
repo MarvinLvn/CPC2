@@ -73,7 +73,8 @@ def set_default_cpc_config(parser):
     group.add_argument('--speakerEmbedding', type=str, default=None,
                        help="(Optional) Path to the frame-level speaker embeddings files that will "
                             "be fed to the prediction network with "
-                            "speaker embeddings along with the usual sequence (.npy format)")
+                            "speaker embeddings along with the usual sequence (.npy format) or"
+                            "that will be used to build the batches")
     group.add_argument('--speakerEmbeddingStep', type=int, default=160,
                        help="Step used for the speaker embeddings in number of frames. "
                             "Should be equal to the step used in the encoded representations. "
@@ -160,4 +161,7 @@ def set_default_cpc_config(parser):
                                     "and whose cosine distance on their speaker embeddings will be computed."
                                     "Then the closest sequences will be chosen to build the batch."
                                     "Should be greater than the batch size.")
+    group_augment.add_argument('--concatenate_spkr_emb', action='store_true',
+                               help="If True, will concatenate the speaker embeddings to the input"
+                                    "of the prediction network")
     return parser

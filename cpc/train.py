@@ -84,6 +84,7 @@ def getCriterion(args, downsampling, nSpeakers, nPhones):
         else:
             mode = "cumNorm" if args.normMode == "cumNorm" else args.cpc_mode
             sizeInputSeq = (args.sizeWindow // downsampling)
+            speakerEmbedding = None if not args.concatenate_spkr_emb else args.speakerEmbedding
             cpcCriterion = cr.CPCUnsupersivedCriterion(args.nPredicts,
                                                        args.hiddenGar,
                                                        args.hiddenEncoder,
@@ -92,7 +93,7 @@ def getCriterion(args, downsampling, nSpeakers, nPhones):
                                                        rnnMode=args.rnnMode,
                                                        dropout=args.dropout,
                                                        nSpeakers=nSpeakers,
-                                                       speakerEmbedding=args.speakerEmbedding,
+                                                       speakerEmbedding=speakerEmbedding,
                                                        sizeInputSeq=sizeInputSeq,
                                                        multihead_rnn=args.multihead_rnn,
                                                        transformer_pruning=args.transformer_pruning,
@@ -835,6 +836,11 @@ def parseArgs(argv, defaults=None):
     if args.samplingType == "temporalsamespeaker" and args.naming_convention != "id_spkr_onset_offset":
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
                          "to id_spkr_onset_offset as we need the speaker, the onset and the offset of each utterance")
+
+    if (args.speakerEmbedding is not None) and (not args.concatenate_spkr_emb) and (args.n_choose_amongst is None):
+        raise ValueError("You want to load speaker embeddings but neither args.concatenate_spkr_emb or "
+                         "args.n_choose_amongst has been set. The speaker embeddings will be of no use."
+                         "Please deactivate this parameter.")
 
     if args.pathCheckpoint is not None:
         args.pathCheckpoint = os.path.abspath(args.pathCheckpoint)
