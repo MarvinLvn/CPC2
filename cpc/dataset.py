@@ -373,9 +373,6 @@ def loadFile(data):
     # Load speaker embedding
     if spkr_emb_path is not None:
         spkr_emb = torch.from_numpy(np.load(spkr_emb_path))
-        # Ugly padding to ensure spkr_emb is not too short
-        if spkr_emb.shape[0] * 160 < seq.shape[0]:
-            spkr_emb = torch.nn.functional.pad(spkr_emb, (0,0,1,1))
     else:
         spkr_emb = torch.empty(0)
 
@@ -482,6 +479,7 @@ class AudioLoader(object):
                             new_batch.append(beg_seq)
             if isinstance(sampler, TemporalSameSpeakerSampler) and new_batch[-1] > self.dataset.seqLabel[-1]:
                 # We make sure that we don't go out of range
+                print("out of range")
                 new_batch[-1] = self.dataset.seqLabel[-1]-windowSize
             new_batches.append(new_batch)
         sampler.batches = new_batches
@@ -687,6 +685,9 @@ class TemporalSameSpeakerSampler(Sampler):
         if self.offset > 0:
             self.sizeSamplers = [max(0, x - 1) for x in self.sizeSamplers]
 
+        if sum(self.sizeSamplers) == 0:
+            raise ValueError("No sampling intervals can be found. "
+                             "Try to increase --max_size_loaded or to reduce the batch size.")
         self.build_batches()
 
     def __len__(self):
