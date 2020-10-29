@@ -119,6 +119,8 @@ class AudioBatchData(Dataset):
             del self.phoneLabels
         if 'seqLabel' in self.__dict__:
             del self.seqLabel
+        if 'dataSpkr' in self.__dict__:
+            del self.dataSpkr
 
     def prepare(self):
         if self.keep_temporality:
@@ -375,7 +377,6 @@ def loadFile(data):
         spkr_emb = torch.from_numpy(np.load(spkr_emb_path))
     else:
         spkr_emb = torch.empty(0)
-
     return speaker, seqName, seq, spkr_emb
 
 
@@ -447,7 +448,8 @@ class AudioLoader(object):
             sampler = self.__n_closest_speaker_embeddings(sampler)
         return DataLoader(self.dataset,
                           batch_sampler=sampler,
-                          num_workers=self.numWorkers)
+                          num_workers=self.numWorkers,
+                          pin_memory=True)
 
     def __remove_artefacts(self, sampler):
         """
