@@ -449,8 +449,7 @@ class AudioLoader(object):
             sampler = self.__n_closest_speaker_embeddings(sampler)
         return DataLoader(self.dataset,
                           batch_sampler=sampler,
-                          num_workers=self.numWorkers,
-                          pin_memory=True)
+                          num_workers=self.numWorkers)
 
     def __remove_artefacts(self, sampler):
         """
