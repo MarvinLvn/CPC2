@@ -184,6 +184,7 @@ class AudioBatchData(Dataset):
             del self.nextData
         self.nextPack = (self.currentPack + 1) % len(self.packageIndex)
         seqStart, seqEnd = self.packageIndex[self.nextPack]
+
         if self.nextPack == 0 and len(self.packageIndex) > 1:
             self.prepare()
 
@@ -228,7 +229,7 @@ class AudioBatchData(Dataset):
 
         self.speakerLabel.append(speakerSize)
         self.data = torch.cat(tmpData, dim=0)
-        self.data_spkr_emb = torch.cat(tmpDataSpkr, dim=0)
+        self.dataSpkr = torch.cat(tmpDataSpkr, dim=0)
 
     def getPhonem(self, idx):
         idPhone = idx // self.phoneSize
@@ -236,7 +237,7 @@ class AudioBatchData(Dataset):
 
     def getSpkrEmb(self, idx):
         spkrEmb = idx // self.spkrEmbeddingSize
-        return self.data_spkr_emb[spkrEmb:(spkrEmb + self.spkrEmbeddingStep)]
+        return self.dataSpkr[spkrEmb:(spkrEmb + self.spkrEmbeddingStep)]
 
     def getSpeakerLabel(self, idx):
         idSpeaker = next(x[0] for x in enumerate(
