@@ -373,6 +373,9 @@ def loadFile(data):
     # Load speaker embedding
     if spkr_emb_path is not None:
         spkr_emb = torch.from_numpy(np.load(spkr_emb_path))
+        # Ugly padding to ensure spkr_emb is not too short
+        if spkr_emb.shape[0] * 160 < seq.shape[0]:
+            spkr_emb = torch.nn.functional.pad(spkr_emb, (0, 0, 1, 1))
     else:
         spkr_emb = torch.empty(0)
     return speaker, seqName, seq, spkr_emb
