@@ -164,4 +164,6 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--concatenate_spkr_emb', action='store_true',
                                help="If True, will concatenate the speaker embeddings to the input"
                                     "of the prediction network")
+    group_augment.add_argument('--n_skipped', type=int, default=0,
+                               help="Number of time steps that will be skipped in the prediction task.")
     return parser

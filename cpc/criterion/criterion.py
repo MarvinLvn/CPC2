@@ -223,7 +223,8 @@ class CPCUnsupersivedCriterion(BaseCriterion):
                  multihead_rnn=False,
                  transformer_pruning=0,
                  size_speaker_emb=512,
-                 dout_speaker_emb=0):
+                 dout_speaker_emb=0,
+                 n_skipped=0):
 
         super(CPCUnsupersivedCriterion, self).__init__()
 
@@ -246,6 +247,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
                 nPredicts, dimOutputAR, dimOutputEncoder, rnnMode=rnnMode,
                 dropout=dropout, sizeInputSeq=sizeInputSeq - nPredicts)
 
+        self.nSkipped = n_skipped
         self.nPredicts = nPredicts
         self.negativeSamplingExt = negativeSamplingExt
         self.lossCriterion = nn.CrossEntropyLoss()
@@ -359,6 +361,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
         batchSize, seqSize, _ = cFeature.size()
         windowSize = seqSize - self.nPredicts
         predictions, labelLoss = self.getPrediction(cFeature, encodedData, label, speaker_embedding)
+
         outLosses = [0 for x in range(self.nPredicts)]
         outAcc = [0 for x in range(self.nPredicts)]
 
@@ -369,6 +372,10 @@ class CPCUnsupersivedCriterion(BaseCriterion):
             outLosses[k] += lossK.view(1, -1)
             _, predsIndex = locPreds.max(1)
             outAcc[k] += torch.sum(predsIndex == labelLoss).float().view(1, -1)
+
+
+        outLosses = outLosses[self.nSkipped:]
+        outAcc = outAcc[self.nSkipped:]
 
         return torch.cat(outLosses, dim=1), \
             torch.cat(outAcc, dim=1) / (windowSize * batchSize)
