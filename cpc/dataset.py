@@ -288,7 +288,8 @@ class AudioBatchData(Dataset):
         return len(self.packageIndex)
 
     def getBaseSampler(self, type, batchSize, offset, balance_sampler=None,
-                       n_choose_amongst=None):
+                       n_choose_amongst=None,
+                       batchSizePerGPU=None):
         if type == "samespeaker":
             return SameSpeakerSampler(batchSize, self.speakerLabel,
                                       self.sizeWindow, offset,
@@ -300,10 +301,12 @@ class AudioBatchData(Dataset):
                                       balance_sampler=balance_sampler,
                                       n_choose_amongst=n_choose_amongst)
         if type == "temporalsamespeaker":
-            return TemporalSameSpeakerSampler(batchSize, self.speakerLabel,
+            return TemporalSameSpeakerSampler(batchSize,
+                                              self.speakerLabel,
                                               self.sizeWindow, offset,
                                               balance_sampler=balance_sampler,
-                                              n_choose_amongst=n_choose_amongst)
+                                              n_choose_amongst=n_choose_amongst,
+                                              batchSizePerGPU=batchSizePerGPU)
         if type == "sequential":
             return SequentialSampler(len(self.data), self.sizeWindow,
                                      offset, batchSize)
@@ -317,7 +320,7 @@ class AudioBatchData(Dataset):
 
     def getDataLoader(self, batchSize, type, randomOffset, numWorkers=0,
                       onLoop=-1, nLoops = -1, balance_sampler=None, remove_artefacts=False,
-                      n_choose_amongst=None):
+                      n_choose_amongst=None, batchSizePerGPU=None):
         r"""
         Get a batch sampler for the current dataset.
         Args:
@@ -357,7 +360,8 @@ class AudioBatchData(Dataset):
                     offset = random.randint(0, self.sizeWindow // 2)
             else:
                 offset = 0
-            return self.getBaseSampler(type, batchSize, offset, balance_sampler, n_choose_amongst)
+            return self.getBaseSampler(type, batchSize, offset, balance_sampler, n_choose_amongst,
+                                       batchSizePerGPU=batchSizePerGPU)
 
         return AudioLoader(self, samplerCall, nLoops, self.loadNextPack,
                            totSize, numWorkers, remove_artefacts, n_choose_amongst)
@@ -448,6 +452,7 @@ class AudioLoader(object):
         # Choose n closest sequences
         if self.n_choose_amongst is not None:
             sampler = self.__n_closest_speaker_embeddings(sampler)
+
         return DataLoader(self.dataset,
                           batch_sampler=sampler,
                           num_workers=self.numWorkers)
@@ -660,10 +665,12 @@ class TemporalSameSpeakerSampler(Sampler):
                  sizeWindow,
                  offset,
                  balance_sampler=None,
-                 n_choose_amongst=None):
+                 n_choose_amongst=None,
+                 batchSizePerGPU=None):
         self.samplingIntervals = samplingIntervals
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
+        self.batchSizePerGPU = batchSizePerGPU
         self.offset = offset
         self.balance_sampler = balance_sampler
         self.n_choose_amongst = n_choose_amongst
@@ -914,18 +921,23 @@ def findAllSeqs(dirName,
             for filename in filtered_files:
                 full_path = os.path.join(root[prefixSize:], filename)
                 outSequences.append((speaker, full_path))
-                if format == "id_spkr_onset_offset":
-                    idStr = '_'.join(filename.split('_')[0:-2])
+                if format is not None:
+                    if format == "id_spkr_onset_offset":
+                        idStr = '_'.join(filename.split('_')[0:-2])
+                    elif format == "spkr-id":
+                        idStr = '-'.join(filename.split('-')[0:2])
+
                     if idStr not in idsTarget:
                         idsTarget[idStr] = len(idsTarget)
                         outIds.append(idStr)
                     outSequencesIds.append((idsTarget[idStr], full_path))
+
     outSpeakers = [None for x in speakersTarget]
     for key, index in speakersTarget.items():
         outSpeakers[index] = key
 
-    # For same speaker temporal sampling
-    if format == "id_spkr_onset_offset":
+    # For temporal sampling, files need to be sorted temporally
+    if format is not None:
         # We sort by onset
         def get_id_spkr_onset(x):
             # Returns (id_spkr, onset) tuple
@@ -933,7 +945,18 @@ def findAllSeqs(dirName,
             splitted = filename.split('_')
             return '_'.join(splitted[0:-2]), float(splitted[-2])
 
-        outSequencesIds = sorted(outSequencesIds, key=get_id_spkr_onset)
+        def get_spkr_id(x):
+            # Returns (spkr, id) tuple
+            filename = x[1]
+            splitted = filename.split('-')
+            return splitted[0], splitted[1]
+
+        if format == "id_spkr_onset_offset":
+            sorting_func = get_id_spkr_onset
+        elif format == "spkr-id":
+            sorting_func = get_spkr_id
+        outSequencesIds = sorted(outSequencesIds, key=sorting_func)
+
         try:
             torch.save((outSequencesIds, outIds), cache_path)
             print(f'Saved cache file at {cache_path}')

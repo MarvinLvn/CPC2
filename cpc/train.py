@@ -229,6 +229,7 @@ def trainStep(dataLoader,
     logs, lastlogs = {}, None
     iter = 0
 
+
     for step, full_data in enumerate(dataLoader):
         sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
@@ -353,7 +354,8 @@ def run(trainDataset,
         adversarial,
         clustering,
         no_artefacts,
-        n_choose_amongst):
+        n_choose_amongst,
+        batchSizePerGPU):
 
     print(f"Running {nEpoch} epochs")
     startEpoch = len(logs["epoch"])
@@ -392,7 +394,8 @@ def run(trainDataset,
                                                  True, numWorkers=0,
                                                  balance_sampler=balance_sampler,
                                                  remove_artefacts=no_artefacts,
-                                                 n_choose_amongst=n_choose_amongst)
+                                                 n_choose_amongst=n_choose_amongst,
+                                                 batchSizePerGPU=batchSizePerGPU)
 
         valLoader = valDataset.getDataLoader(batchSize, 'sequential', False,
                                              numWorkers=0) if valDataset else []
@@ -467,6 +470,7 @@ def main(argv):
             args = parseArgs(argv, default_values)
             args.load, load_optimizer = [data], True
             args.loadCriterion = True
+
     batchSize = args.nGPU * args.batchSizeGPU
 
     if args.speakerEmbedding is not None and not os.path.exists(args.speakerEmbedding):
@@ -482,6 +486,7 @@ def main(argv):
 
     print(f'CONFIG:\n{json.dumps(vars(args), indent=4, sort_keys=True)}')
     print('-' * 50)
+
     seqNames, speakers = findAllSeqs(args.pathDB,
                                      extension=args.file_extension,
                                      loadCache=not args.ignore_cache,
@@ -687,7 +692,6 @@ def main(argv):
         for i in range(len(logs["epoch"])):
             scheduler.step()
 
-    print('args.local_rank: ' + str(args.local_rank))
     if args.distributed:
         cpcModel = torch.nn.parallel.DistributedDataParallel(cpcModel, device_ids=[
                                                              args.local_rank], output_device=args.local_rank, broadcast_buffers=True)
@@ -709,9 +713,8 @@ def main(argv):
 
     balance_sampler = None
     if args.balance_type is not None:
-        balance_sampler= get_balance_sampler(args.balance_type,
+        balance_sampler = get_balance_sampler(args.balance_type,
                                              balance_coeff=args.balance_coeff)
-
     run(trainDataset,
         valDataset,
         batchSize,
@@ -727,7 +730,8 @@ def main(argv):
         adversarial,
         clustering,
         args.no_artefacts,
-        args.n_choose_amongst)
+        args.n_choose_amongst,
+        args.batchSizeGPU)
 
 
 def parseArgs(argv, defaults=None):
@@ -835,9 +839,11 @@ def parseArgs(argv, defaults=None):
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True "
                          "as this mode is not compatible with other sampling methods")
 
-    if args.samplingType == "temporalsamespeaker" and args.naming_convention != "id_spkr_onset_offset":
+    if args.samplingType == "temporalsamespeaker" and \
+            (args.naming_convention != "id_spkr_onset_offset" and args.naming_convention != "spkr-id"):
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
-                         "to id_spkr_onset_offset as we need the speaker, the onset and the offset of each utterance")
+                         "to id_spkr_onset_offset (daylong recordings) or spkr-id (librispeech) "
+                         "as we need to sort the files temporally.")
 
     if (args.speakerEmbedding is not None) and (not args.concatenate_spkr_emb) and (args.n_choose_amongst is None):
         raise ValueError("You want to load speaker embeddings but neither args.concatenate_spkr_emb or "

@@ -141,7 +141,7 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--t_ms', type=int, default=100)
     group_augment.add_argument('--pathDBNoise', type=str, default=None)
     group_augment.add_argument('--pathSeqNoise', type=str, default=None)
-    group_augment.add_argument('--naming_convention', type=str, default=None, choices=[None, 'id_spkr_onset_offset'])
+    group_augment.add_argument('--naming_convention', type=str, default=None, choices=[None, 'id_spkr_onset_offset', 'spkr-id'])
     group_augment.add_argument('--train_prop', type=float, default=0.9, required=False,
                                help="Proportion of files belonging to the training set"
                                     " (only if pathVal and pathTrain are not specified)")
