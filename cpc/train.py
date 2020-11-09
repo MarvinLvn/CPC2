@@ -231,7 +231,8 @@ def trainStep(dataLoader,
 
 
     for step, full_data in enumerate(dataLoader):
-        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
+        sequence, label, spkr_emb, idx = [x.cuda(non_blocking=True) for x in full_data]
+        print(idx)
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
 
         b = past.size(0)
@@ -355,7 +356,8 @@ def run(trainDataset,
         clustering,
         no_artefacts,
         n_choose_amongst,
-        batchSizePerGPU):
+        batchSizePerGPU,
+        minibatch_wise):
 
     print(f"Running {nEpoch} epochs")
     startEpoch = len(logs["epoch"])
@@ -395,7 +397,8 @@ def run(trainDataset,
                                                  balance_sampler=balance_sampler,
                                                  remove_artefacts=no_artefacts,
                                                  n_choose_amongst=n_choose_amongst,
-                                                 batchSizePerGPU=batchSizePerGPU)
+                                                 batch_size_per_gpu=batchSizePerGPU,
+                                                 minibatch_wise=minibatch_wise)
 
         valLoader = valDataset.getDataLoader(batchSize, 'sequential', False,
                                              numWorkers=0) if valDataset else []
@@ -731,7 +734,8 @@ def main(argv):
         clustering,
         args.no_artefacts,
         args.n_choose_amongst,
-        args.batchSizeGPU)
+        args.batchSizeGPU,
+        args.minibatch_wise)
 
 
 def parseArgs(argv, defaults=None):

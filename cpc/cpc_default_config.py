@@ -166,4 +166,8 @@ def set_default_cpc_config(parser):
                                     "of the prediction network")
     group_augment.add_argument('--n_skipped', type=int, default=0,
                                help="Number of time steps that will be skipped in the prediction task.")
+    group_augment.add_argument('--minibatch_wise', action='store_true', default=False,
+                               help="If, true, all the processes will be done minibatch wise instead of batch wise "
+                                    "(only works if temporal sampling is activated) : 8 consecutive sequences per minibatch"
+                                    "instead of 64 per batch, etc.")
     return parser

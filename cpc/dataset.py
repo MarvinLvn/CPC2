@@ -2,25 +2,21 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import functools
 import os
-import math
 import random
 import time
-import tqdm
-import torch
-import statistics
-import numpy as np
-from pathlib import Path
 from copy import deepcopy
-from functools import partial
-from torch.multiprocessing import Pool
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.data.dataloader import _SingleProcessDataLoaderIter
-from torch.utils.data.sampler import Sampler, BatchSampler
-from scipy.spatial.distance import cdist
+from pathlib import Path
 
+import numpy as np
+import torch
 import torch.nn as nn
 import torchaudio
+import tqdm
+from torch.multiprocessing import Pool
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.sampler import Sampler, BatchSampler
 
 
 class AudioBatchData(Dataset):
@@ -274,9 +270,9 @@ class AudioBatchData(Dataset):
         outData = torch.cat([x1, x2], dim=0)
 
         if self.doubleLabels:
-            return outData, label, label_phone, outDataSpkrEmb
+            return outData, label, label_phone, idx, outDataSpkrEmb
 
-        return outData, label, outDataSpkrEmb
+        return outData, label, outDataSpkrEmb, idx
 
     def getNSpeakers(self):
         return len(self.speakers)
@@ -287,9 +283,12 @@ class AudioBatchData(Dataset):
     def getNLoadsPerEpoch(self):
         return len(self.packageIndex)
 
-    def getBaseSampler(self, type, batchSize, offset, balance_sampler=None,
+    def getBaseSampler(self, type, batchSize,
+                       offset, balance_sampler=None,
                        n_choose_amongst=None,
-                       batchSizePerGPU=None):
+                       batchSizePerGPU=None,
+                       minibatch_wise=False):
+
         if type == "samespeaker":
             return SameSpeakerSampler(batchSize, self.speakerLabel,
                                       self.sizeWindow, offset,
@@ -306,7 +305,8 @@ class AudioBatchData(Dataset):
                                               self.sizeWindow, offset,
                                               balance_sampler=balance_sampler,
                                               n_choose_amongst=n_choose_amongst,
-                                              batchSizePerGPU=batchSizePerGPU)
+                                              batchSizePerGPU=batchSizePerGPU,
+                                              minibatch_wise=minibatch_wise)
         if type == "sequential":
             return SequentialSampler(len(self.data), self.sizeWindow,
                                      offset, batchSize)
@@ -320,7 +320,7 @@ class AudioBatchData(Dataset):
 
     def getDataLoader(self, batchSize, type, randomOffset, numWorkers=0,
                       onLoop=-1, nLoops = -1, balance_sampler=None, remove_artefacts=False,
-                      n_choose_amongst=None, batchSizePerGPU=None):
+                      n_choose_amongst=None, batch_size_per_gpu=None, minibatch_wise=False):
         r"""
         Get a batch sampler for the current dataset.
         Args:
@@ -346,22 +346,26 @@ class AudioBatchData(Dataset):
         if onLoop >= 0:
             self.currentPack = onLoop - 1
             self.loadNextPack()
-            nLoops = 1 if nLoops <=0 else nLoops
-        elif nLoops <= 0 :
+            nLoops = 1 if nLoops <= 0 else nLoops
+        elif nLoops <= 0:
             nLoops = len(self.packageIndex)
 
         def samplerCall():
             if randomOffset:
                 if type == "temporalsamespeaker":
-                    # We sample the whole batch at once
-                    offset = random.randint(0, self.sizeWindow * batchSize)
+                    if minibatch_wise:
+                        # We sample the whole minibatch at once
+                        offset = random.randint(0, self.sizeWindow * batch_size_per_gpu) # batch_size_per_grpu
+                    else:
+                        # We sample the whole batch at once
+                        offset = random.randint(0, self.sizeWindow * batchSize)
                 else:
                     # We sample sequence per sequence
                     offset = random.randint(0, self.sizeWindow // 2)
             else:
                 offset = 0
-            return self.getBaseSampler(type, batchSize, offset, balance_sampler, n_choose_amongst,
-                                       batchSizePerGPU=batchSizePerGPU)
+            return self.getBaseSampler(type, batchSize, offset, balance_sampler,
+                                       n_choose_amongst, batch_size_per_gpu, minibatch_wise)
 
         return AudioLoader(self, samplerCall, nLoops, self.loadNextPack,
                            totSize, numWorkers, remove_artefacts, n_choose_amongst)
@@ -477,7 +481,9 @@ class AudioLoader(object):
             offset = 0
             for beg_seq in batch:
                 beg_seq += offset
+                # Loop through the sequences' name
                 for i in range(1, len(seqLabels)):
+                    # if there's an artifact
                     if seqLabels[i-1] <= beg_seq < seqLabels[i]:
                         if beg_seq + windowSize > seqLabels[i]:
                             new_batch.append(seqLabels[i])
@@ -666,14 +672,20 @@ class TemporalSameSpeakerSampler(Sampler):
                  offset,
                  balance_sampler=None,
                  n_choose_amongst=None,
-                 batchSizePerGPU=None):
+                 batchSizePerGPU=None,
+                 minibatch_wise=False):
         self.samplingIntervals = samplingIntervals
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
-        self.batchSizePerGPU = batchSizePerGPU
         self.offset = offset
         self.balance_sampler = balance_sampler
         self.n_choose_amongst = n_choose_amongst
+        self.batchSizePerGPU = batchSizePerGPU
+        self.minibatch_wise = minibatch_wise
+
+        if self.minibatch_wise:
+            self.saveBatchSize = self.batchSize
+            self.batchSize = self.batchSizePerGPU
 
         if self.n_choose_amongst is not None:
             self.effectiveBatchSize = self.batchSize
@@ -686,6 +698,10 @@ class TemporalSameSpeakerSampler(Sampler):
             raise AttributeError("Sampling intervals should start at zero")
 
         nWindows = len(self.samplingIntervals) - 1
+
+        print("self.saveBatchSize %d" % self.saveBatchSize)
+        print("self.batchSize %d" % self.batchSize)
+
         # One batch will be of size : self.sizeWindow * self.batchSize
         # And one batch will be made of consecutive chunks of audios
         self.sizeSamplers = [(self.samplingIntervals[i+1] -
@@ -722,16 +738,29 @@ class TemporalSameSpeakerSampler(Sampler):
             order = [(x, torch.randperm(val).tolist())
                      for x, val in enumerate(self.sizeSamplers) if val > 0]
 
-        # Build Batches
-        self.batches = []
+        # Build batches (or minibatches depending on the config)
+        batches = []
         for indexSampler, randperm in order:
             indexStart, sizeSampler = 0, len(randperm)
             while indexStart < sizeSampler:
                 indexEnd = min(sizeSampler, indexStart + self.batchSize)
                 for x in randperm[indexStart:indexEnd]:
                     locBatch = self.getIndices(x, indexSampler)
-                    self.batches.append(locBatch)
+                    batches.append(locBatch)
                 indexStart = indexEnd
+
+        # Merge minibatches if needed
+        if self.minibatch_wise:
+            self.batches = []
+            nb_merge = self.saveBatchSize // self.batchSizePerGPU
+            for i in range(0, len(batches), nb_merge):
+                self.batches.append(functools.reduce(lambda a, b: list(a)+list(b), batches[i:i+nb_merge]))
+
+            # Remove last element if it's a full minibatch
+            if i + nb_merge > len(batches):
+                self.batches.pop()
+        else:
+            self.batches = batches
 
     def get_balanced_sampling(self):
         # untested
