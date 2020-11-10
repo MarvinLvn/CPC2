@@ -270,9 +270,9 @@ class AudioBatchData(Dataset):
         outData = torch.cat([x1, x2], dim=0)
 
         if self.doubleLabels:
-            return outData, label, label_phone, idx, outDataSpkrEmb
+            return outData, label, label_phone, outDataSpkrEmb
 
-        return outData, label, outDataSpkrEmb, idx
+        return outData, label, outDataSpkrEmb
 
     def getNSpeakers(self):
         return len(self.speakers)

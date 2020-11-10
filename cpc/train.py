@@ -231,7 +231,7 @@ def trainStep(dataLoader,
 
 
     for step, full_data in enumerate(dataLoader):
-        sequence, label, spkr_emb, idx = [x.cuda(non_blocking=True) for x in full_data]
+        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
 
         b = past.size(0)
