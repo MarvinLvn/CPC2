@@ -699,9 +699,6 @@ class TemporalSameSpeakerSampler(Sampler):
 
         nWindows = len(self.samplingIntervals) - 1
 
-        print("self.saveBatchSize %d" % self.saveBatchSize)
-        print("self.batchSize %d" % self.batchSize)
-
         # One batch will be of size : self.sizeWindow * self.batchSize
         # And one batch will be made of consecutive chunks of audios
         self.sizeSamplers = [(self.samplingIntervals[i+1] -
