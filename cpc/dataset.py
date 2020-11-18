@@ -483,21 +483,25 @@ class AudioLoader(object):
             offset = 0
             for beg_seq in batch:
                 beg_seq += offset
+                delete_batch = False
                 # Loop through the sequences' name
                 for i in range(1, len(seqLabels)):
                     # if there's an artifact
                     if seqLabels[i-1] <= beg_seq < seqLabels[i]:
                         if beg_seq + windowSize > seqLabels[i]:
-                            new_batch.append(seqLabels[i])
+                            if i != len(seqLabels)-1:
+                                new_batch.append(seqLabels[i])
+                            else:
+                                print("warning, deleting batch because artifact "
+                                      "cannot be removed without going out of bounds")
+                                delete_batch = True
                             if isinstance(sampler, TemporalSameSpeakerSampler):
                                 offset += seqLabels[i] - beg_seq
                         else:
                             new_batch.append(beg_seq)
-            if isinstance(sampler, TemporalSameSpeakerSampler) and new_batch[-1] > self.dataset.seqLabel[-1]:
-                # We make sure that we don't go out of range
-                print("out of range")
-                new_batch[-1] = self.dataset.seqLabel[-1]-windowSize
-            new_batches.append(new_batch)
+
+            if not delete_batch:
+                new_batches.append(new_batch)
         sampler.batches = new_batches
         return sampler
 
