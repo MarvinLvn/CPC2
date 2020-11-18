@@ -246,6 +246,7 @@ class AudioBatchData(Dataset):
     def __getitem__(self, idx):
         if idx < 0 or idx >= len(self.data) - self.sizeWindow - 1:
             print(idx)
+            print("upper bound %d" % (len(self.data) - self.sizeWindow - 1))
             raise ValueError("too high")
         outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
         outDataSpkrEmb = self.getSpkrEmb(idx)
