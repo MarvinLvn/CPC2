@@ -246,6 +246,7 @@ class AudioBatchData(Dataset):
     def __getitem__(self, idx):
         if idx < 0 or idx >= len(self.data) - self.sizeWindow - 1:
             print(idx)
+            raise ValueError("too high")
         outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
         outDataSpkrEmb = self.getSpkrEmb(idx)
 
@@ -423,7 +424,7 @@ class AudioLoader(object):
                  updateCall,
                  size,
                  numWorkers,
-                 remove_artefacts = False,
+                 remove_artefacts=False,
                  n_choose_amongst=None):
         r"""
         Args:
@@ -500,20 +501,45 @@ class AudioLoader(object):
         return sampler
 
     def __n_closest_speaker_embeddings(self, sampler):
-        # load speaker embedding for every batch
-        # Number of speaker embeddings = number_of_batch * n_choose_amongst
-        # in total, we have n_batch * n_choose_amongst * spkr_emb_nb_feat
-        speaker_embeddings = torch.stack([torch.stack([self.dataset.getSpkrEmb(idx).mean(dim=0) for idx in batch])
-                                          for batch in sampler.batches])
-
         cos = nn.CosineSimilarity()
-        for i, spkr_emb_batch in enumerate(speaker_embeddings):
-            seq0 = spkr_emb_batch[0].view(1, -1)
-            sim0all = cos(seq0, spkr_emb_batch)
+        if hasattr(sampler, 'minibatch_wise') and sampler.minibatch_wise:
+            # for each batch (of size 64)
+            # for each minibatch within this batch
+            # for each idx within this minibatch
+            #   get speaker embeddings
+            # this will lead to a list of shape : [NB_BATCHES, MINIBATCH_SIZE, N_CHOOSE_AMONGST, NB_FEATURES]
+            speaker_embeddings = torch.stack([
+                                    torch.stack([
+                                        torch.stack([self.dataset.getSpkrEmb(idx).mean(dim=0)
+                                                for idx in batch[minibatch_idx:minibatch_idx+self.n_choose_amongst]])
+                                                for minibatch_idx in range(0, len(batch), self.n_choose_amongst)])
+                                                for batch in sampler.batches])
 
-            # Extract sequences that have the highest cosine similarity
-            max_indices = sorted(torch.topk(sim0all, sampler.effectiveBatchSize).indices)
-            sampler.batches[i] = [sampler.batches[i][idx] for idx in max_indices]
+            for i, spkr_emb_batch in enumerate(speaker_embeddings):
+                new_batch = []
+                for j, spkr_emb_minibatch in enumerate(spkr_emb_batch):
+                    seq0 = spkr_emb_minibatch[0].view(1, -1)
+                    sim0all = cos(seq0, spkr_emb_minibatch)
+
+                    # Extract sequences that have the highest cosine similarity
+                    max_indices = sorted(torch.topk(sim0all, sampler.effectiveBatchSize).indices)
+                    minibatch_idx = j * self.n_choose_amongst
+                    new_batch += [sampler.batches[i][minibatch_idx+idx] for idx in max_indices]
+                sampler.batches[i] = new_batch
+        else:
+            # load speaker embedding for every batch
+            # Number of speaker embeddings = number_of_batch * n_choose_amongst
+            # in total, we have n_batch * n_choose_amongst * spkr_emb_nb_feat
+            speaker_embeddings = torch.stack([torch.stack([self.dataset.getSpkrEmb(idx).mean(dim=0) for idx in batch])
+                                              for batch in sampler.batches])
+
+            for i, spkr_emb_batch in enumerate(speaker_embeddings):
+                seq0 = spkr_emb_batch[0].view(1, -1)
+                sim0all = cos(seq0, spkr_emb_batch)
+
+                # Extract sequences that have the highest cosine similarity
+                max_indices = sorted(torch.topk(sim0all, sampler.effectiveBatchSize).indices)
+                sampler.batches[i] = [sampler.batches[i][idx] for idx in max_indices]
 
         return sampler
 
@@ -684,10 +710,15 @@ class TemporalSameSpeakerSampler(Sampler):
         self.minibatch_wise = minibatch_wise
 
         if self.minibatch_wise:
+            # In this case, minibatchSize will be 8
+            # and we'll merge packs of 8 together to have
+            # a total batchSize of 64
             self.saveBatchSize = self.batchSize
             self.batchSize = self.batchSizePerGPU
 
         if self.n_choose_amongst is not None:
+            # In this case, the batchSize will become n_choose_amongst
+            # and we'll choose the effectiveBatchSize closest sequences
             self.effectiveBatchSize = self.batchSize
             self.batchSize = self.n_choose_amongst
             print("Will compute the %d closest sequences amongst %d sequences in total.\n"

@@ -1,7 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
 # This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# LICENSE file in the root directory of this source aee.
 import argparse
 import json
 import os
@@ -852,6 +852,10 @@ def parseArgs(argv, defaults=None):
         raise ValueError("You want to load speaker embeddings but neither args.concatenate_spkr_emb or "
                          "args.n_choose_amongst has been set. The speaker embeddings will be of no use."
                          "Please deactivate this parameter.")
+
+    if args.speakerEmbedding is None and (args.concatenate_spkr_emb or (args.n_choose_amongst is not None)):
+        raise ValueError("You have activated args.concatenate_spkr_emb or args.n_choose_amongst but "
+                         "haven't specified args.speakerEmbedding")
 
     if args.pathCheckpoint is not None:
         args.pathCheckpoint = os.path.abspath(args.pathCheckpoint)
