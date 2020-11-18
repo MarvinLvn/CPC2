@@ -381,9 +381,11 @@ class CPCModel(nn.Module):
         encodedData = self.gEncoder(batchData).permute(0, 2, 1)
 
         if self.mask_prob > 0.0:
-            encodedData = self.getMask(encodedData)
+            masked_encodedData = self.getMask(encodedData)
+            cFeature = self.gAR(masked_encodedData)
+        else:
+            cFeature = self.gAR(encodedData)
 
-        cFeature = self.gAR(encodedData)
         return cFeature, encodedData, label
 
 
