@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import time
 from copy import deepcopy
-import random
 import psutil
 import sys
 import torchaudio
@@ -25,6 +24,7 @@ from cpc.criterion.research import CPCBertCriterion, DeepEmbeddedClustering, \
     DeepClustering, CTCCLustering, buildNewPhoneDict
 from cpc.distributed_training.distributed_mode import init_distributed_mode
 from cpc.data_augmentation import augmentation_factory
+import random
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -501,6 +501,8 @@ def main(argv):
     if args.pathTrain is not None:
         seqTrain = filterSeqs(args.pathTrain, seqNames)
     else:
+        import random
+        random.shuffle(seqNames)
         train_nb_files = int(args.train_prop*len(seqNames))
         seqTrain = seqNames[0:train_nb_files]
 
