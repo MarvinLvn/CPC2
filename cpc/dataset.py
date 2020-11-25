@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchaudio
+torchaudio.set_audio_backend('sox_io')
 import tqdm
 from torch.multiprocessing import Pool
 from torch.utils.data import Dataset, DataLoader
@@ -380,7 +381,7 @@ def loadFile(data):
     seqName = fullPath.stem
 
     # Load audio
-    seq = torchaudio.load(fullPath)[0].mean(dim=0)
+    seq = torchaudio.load(str(fullPath))[0].mean(dim=0)
     # Load speaker embedding
     if spkr_emb_path is not None:
         spkr_emb = torch.from_numpy(np.load(spkr_emb_path))
@@ -905,8 +906,7 @@ class SameSpeakerSampler(Sampler):
 
 def extractLength(couple):
     speaker, locPath = couple
-    info = torchaudio.info(str(locPath))[0]
-    return info.length
+    return torchaudio.info(str(locPath)).num_frames
 
 
 def findAllSeqs(dirName,
