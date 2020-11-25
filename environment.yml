@@ -1,13 +1,13 @@
-name: cpc2
+name: cpc3
 channels:
   - pytorch
   - anaconda
   - conda-forge
   - defaults
 dependencies:
-  - pytorch=1.3.0
+  - pytorch=1.6.0
   - torchvision
-  - cudatoolkit=9.2
+  - cudatoolkit=10.2
   - psutil
   - pip
   - openblas-devel
@@ -18,4 +18,4 @@ dependencies:
   - pip:
     - progressbar2
     - matplotlib
-    - torchaudio==0.3.1
+    - torchaudio==0.6.0
