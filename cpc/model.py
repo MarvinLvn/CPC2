@@ -363,7 +363,7 @@ class CPCModel(nn.Module):
             nb_masked += len(mask_idc)
 
         percentage_masked = nb_masked / (bsz * all_sz)
-        if percentage_masked > 0.5:
+        if percentage_masked > 0.6:
             warnings.warn("We detected that %.2f of all encoded frames have been masked. This might be too much." % percentage_masked)
         return mask
 
