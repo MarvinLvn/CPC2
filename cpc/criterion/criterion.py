@@ -311,7 +311,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
     def getInnerLoss(self):
         return "orthoLoss", self.orthoLoss * self.wPrediction.orthoCriterion()
 
-    def getPrediction(self, cFeature, encodedData, label, speaker_embedding):
+    def getPrediction(self, cFeature, encodedData, label, speaker_embedding=None):
         if self.mode == "reverse":
             encodedData = torch.flip(encodedData, [1])
             cFeature = torch.flip(cFeature, [1])
@@ -329,7 +329,6 @@ class CPCUnsupersivedCriterion(BaseCriterion):
             cFeature = self.speaker_emb_concatenator(cFeature, speaker_embedding)
 
         return self.wPrediction(cFeature, sampledData), labelLoss
-
 
     def getCosineDistances(self, cFeature, encodedData):
 
@@ -356,7 +355,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
 
         return self.wPrediction(cFeature, out)
 
-    def forward(self, cFeature, encodedData, label, speaker_embedding):
+    def forward(self, cFeature, encodedData, label, speaker_embedding=None):
 
         batchSize, seqSize, _ = cFeature.size()
         windowSize = seqSize - self.nPredicts

@@ -229,9 +229,8 @@ def trainStep(dataLoader,
     logs, lastlogs = {}, None
     iter = 0
 
-
     for step, full_data in enumerate(dataLoader):
-        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
+        sequence, label, *spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
 
         b = past.size(0)
@@ -243,7 +242,14 @@ def trainStep(dataLoader,
         c_feature = c_feature[:b, :, :]
         encoded_data = encoded_data[b:, :, :]
         label =label[:b]
-        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
+
+        if len(spkr_emb) != 0:
+            # with speaker embedding
+            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb[0])
+        else:
+            # without speaker embedding
+            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
+
         totLoss = allLosses.sum()
         totLoss.backward()
 
@@ -302,7 +308,8 @@ def valStep(dataLoader,
     iter = 0
 
     for step, full_data in enumerate(dataLoader):
-        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
+
+        sequence, label, *spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
 
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
         label = torch.cat([label, label])
@@ -316,7 +323,13 @@ def valStep(dataLoader,
             encoded_data = encoded_data[b:, ...]
             label =label[:b]
 
-            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
+            if len(spkr_emb) != 0:
+                # with speaker embedding
+                allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb[0])
+            else:
+                # without speaker embedding
+                allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
+
             if clustering is not None:
                 lossCluster = clustering(c_feature, label)
 
