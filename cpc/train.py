@@ -21,7 +21,6 @@ from cpc.data_augmentation import augmentation_factory
 from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
     PeakNorm
 
-
 #torch.multiprocessing.set_sharing_strategy('file_system')
 
 def getCriterion(args, downsampling, nSpeakers, nPhones):
@@ -40,7 +39,13 @@ def getCriterion(args, downsampling, nSpeakers, nPhones):
                                                        dropout=args.dropout,
                                                        nSpeakers=nSpeakers,
                                                        speakerEmbedding=args.speakerEmbedding,
-                                                       sizeInputSeq=sizeInputSeq)
+                                                       sizeInputSeq=sizeInputSeq,
+                                                       multihead_rnn=args.multihead_rnn,
+                                                       transformer_pruning=args.transformer_pruning,
+                                                       size_speaker_emb=args.size_speaker_emb,
+                                                       dout_speaker_emb=args.dout_speaker_emb,
+                                                       n_skipped=args.n_skipped
+                                                       )
     elif args.pathPhone is not None:
         if not args.CTC:
             cpcCriterion = cr.PhoneCriterion(dimFeatures,
