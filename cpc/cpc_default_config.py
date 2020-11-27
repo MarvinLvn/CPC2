@@ -67,9 +67,6 @@ def set_default_cpc_config(parser):
                        "classification on the encoder's output.")
     group.add_argument('--random_seed', type=int, default=None,
                        help="Set a specific random seed.")
-    group.add_argument('--adversarial', action='store_true',
-                       help="(Depreciated) Activate the speaker adversarial "
-                       "training.")
     group.add_argument('--speakerEmbedding', type=str, default=None,
                        help="(Optional) Path to the frame-level speaker embeddings files that will "
                             "be fed to the prediction network with "
@@ -104,27 +101,38 @@ def set_default_cpc_config(parser):
     group.add_argument('--abspos', action='store_true',
                        help='If the prediction network is a transformer, '
                        'active to use absolute coordinates.')
-    group.add_argument('--clustering', type=str, default=None,
-                       choices=['deepEmbedded', 'deepClustering',
-                                'CTCClustering'],
-                       help="(Research) add a clustering loss on top of the "
-                       "current training.")
-    group.add_argument('--n_clusters', type=int, default=200,
-                       help="(Clustering only) Number of clusters to compute")
-    group.add_argument('--cluster_delay', type=int, default=0,
-                       help="(Clustering only) wait the given number of "
-                       "epoch before activating the clustering loss.")
-    group.add_argument('--cluster_iter', type=int, default=100,
-                       help="(Clustering only) Maximal number of iterations "
-                       "when computing the clusters")
-    group.add_argument('--clustering_update', type=str, default='kmean',
-                       choices=['kmean', 'dpmean'],
-                       help="(Clustering only) Clustering method to use.")
     group.add_argument('--multihead_rnn', action='store_true',
                        help="Use one rnn network with k classifiers on top "
                        "of it instead of k independant rnn networks")
     group.add_argument('--adapt_span_loss', type=float, default=2e-6)
     group.add_argument('--transformer_pruning', type=int, default=0)
+    group.add_argument('--naming_convention', type=str, default=None,
+                               choices=[None, 'id_spkr_onset_offset', 'spkr-id'])
+    group.add_argument('--no_artefacts', action='store_true',
+                               help="Avoid creating artefacts when building batches. "
+                                    "If this option is activated, it will check for each sequence that the latter "
+                                    "remains in one single recording. If not, it will shift the sequence "
+                                    "to avoid creating artefacts.")
+    group.add_argument('--mask_prob', type=float, default=0.0,
+                               help="Probability of creating a mask on the encoded features "
+                                    "(only supported for CPC models for now).")
+    group.add_argument('--mask_length', type=int, default=10,
+                               help="Number of frames a mask will cover "
+                                    "(only supported for CPC models for now).")
+    group.add_argument('--n_choose_amongst', type=int, default=None,
+                               help="Number of sequences that will be first extracted, "
+                                    "and whose cosine distance on their speaker embeddings will be computed."
+                                    "Then the closest sequences will be chosen to build the batch."
+                                    "Should be greater than the batch size.")
+    group.add_argument('--concatenate_spkr_emb', action='store_true',
+                               help="If True, will concatenate the speaker embeddings to the input"
+                                    "of the prediction network")
+    group.add_argument('--n_skipped', type=int, default=0,
+                               help="Number of time steps that will be skipped in the prediction task.")
+    group.add_argument('--minibatch_wise', action='store_true', default=False,
+                               help="If, true, all the processes will be done minibatch wise instead of batch wise "
+                                    "(only works if temporal sampling is activated) : 8 consecutive sequences per minibatch"
+                                    "instead of 64 per batch, etc.")
 
     group_augment = parser.add_argument_group('Data augmentation configuration',
                                       description="The arguments defining the "
@@ -141,33 +149,4 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--t_ms', type=int, default=100)
     group_augment.add_argument('--pathDBNoise', type=str, default=None)
     group_augment.add_argument('--pathSeqNoise', type=str, default=None)
-    group_augment.add_argument('--naming_convention', type=str, default=None, choices=[None, 'id_spkr_onset_offset', 'spkr-id'])
-    group_augment.add_argument('--train_prop', type=float, default=0.9, required=False,
-                               help="Proportion of files belonging to the training set"
-                                    " (only if pathVal and pathTrain are not specified)")
-    group_augment.add_argument('--no_artefacts', action='store_true',
-                               help="Avoid creating artefacts when building batches. "
-                                    "If this option is activated, it will check for each sequence that the latter "
-                                    "remains in one single recording. If not, it will shift the sequence "
-                                    "to avoid creating artefacts.")
-    group_augment.add_argument('--mask_prob', type=float, default=0.0,
-                               help="Probability of creating a mask on the encoded features "
-                                    "(only supported for CPC models for now).")
-    group_augment.add_argument('--mask_length', type=int, default=10,
-                               help="Number of frames a mask will cover "
-                                    "(only supported for CPC models for now).")
-    group_augment.add_argument('--n_choose_amongst', type=int, default=None,
-                               help="Number of sequences that will be first extracted, "
-                                    "and whose cosine distance on their speaker embeddings will be computed."
-                                    "Then the closest sequences will be chosen to build the batch."
-                                    "Should be greater than the batch size.")
-    group_augment.add_argument('--concatenate_spkr_emb', action='store_true',
-                               help="If True, will concatenate the speaker embeddings to the input"
-                                    "of the prediction network")
-    group_augment.add_argument('--n_skipped', type=int, default=0,
-                               help="Number of time steps that will be skipped in the prediction task.")
-    group_augment.add_argument('--minibatch_wise', action='store_true', default=False,
-                               help="If, true, all the processes will be done minibatch wise instead of batch wise "
-                                    "(only works if temporal sampling is activated) : 8 consecutive sequences per minibatch"
-                                    "instead of 64 per batch, etc.")
     return parser

@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchaudio
-torchaudio.set_audio_backend('sox_io')
+
 import tqdm
 from torch.multiprocessing import Pool
 from torch.utils.data import Dataset, DataLoader

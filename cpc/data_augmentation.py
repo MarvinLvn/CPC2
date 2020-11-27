@@ -269,6 +269,7 @@ def get_augment(augment_type, **kwargs):
     else:
         raise RuntimeError(f'Unknown augment_type = {augment_type}')
 
+
 def augmentation_factory(args, noise_dataset=None):
 
     if not args.augment_type or args.augment_type == 'none' or not (args.augment_past or args.augment_future):
