@@ -17,43 +17,30 @@ import cpc.utils.misc as utils
 import numpy as np
 import torch
 from cpc.cpc_default_config import set_default_cpc_config
-from cpc.criterion.research import CPCBertCriterion
 from cpc.data_augmentation import augmentation_factory
 from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
     PeakNorm
 
-#torch.multiprocessing.set_sharing_strategy('file_system')
 
+#torch.multiprocessing.set_sharing_strategy('file_system')
 
 def getCriterion(args, downsampling, nSpeakers, nPhones):
     dimFeatures = args.hiddenGar if not args.onEncoder else args.hiddenEncoder
     if not args.supervised:
-        if args.cpc_mode == "bert":
-            cpcCriterion = CPCBertCriterion(args.hiddenGar,
-                                            args.hiddenEncoder,
-                                            args.negativeSamplingExt)
-        elif args.cpc_mode == 'none':
+        if args.cpc_mode == 'none':
             cpcCriterion = cr.NoneCriterion()
-            args.cluster_delay = 0
         else:
-            mode = "cumNorm" if args.normMode == "cumNorm" else args.cpc_mode
             sizeInputSeq = (args.sizeWindow // downsampling)
-            speakerEmbedding = None if not args.concatenate_spkr_emb else args.speakerEmbedding
             cpcCriterion = cr.CPCUnsupersivedCriterion(args.nPredicts,
                                                        args.hiddenGar,
                                                        args.hiddenEncoder,
                                                        args.negativeSamplingExt,
-                                                       mode=mode,
+                                                       mode=args.cpc_mode,
                                                        rnnMode=args.rnnMode,
                                                        dropout=args.dropout,
                                                        nSpeakers=nSpeakers,
-                                                       speakerEmbedding=speakerEmbedding,
-                                                       sizeInputSeq=sizeInputSeq,
-                                                       multihead_rnn=args.multihead_rnn,
-                                                       transformer_pruning=args.transformer_pruning,
-                                                       size_speaker_emb=args.size_speaker_emb,
-                                                       dout_speaker_emb=args.dout_speaker_emb,
-                                                       n_skipped=args.n_skipped)
+                                                       speakerEmbedding=args.speakerEmbedding,
+                                                       sizeInputSeq=sizeInputSeq)
     elif args.pathPhone is not None:
         if not args.CTC:
             cpcCriterion = cr.PhoneCriterion(dimFeatures,
@@ -94,10 +81,8 @@ def trainStep(dataLoader,
 
     for step, full_data in enumerate(dataLoader):
         sequence, label, *spkr_emb = full_data
-
         sequence = sequence.cuda(non_blocking=True)
         label = label.cuda(non_blocking=True)
-        spkr_emb = spkr_emb[0].cuda(non_blocking=True)
 
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
         b = past.size(0)
@@ -112,6 +97,7 @@ def trainStep(dataLoader,
 
         if len(spkr_emb) != 0:
             # with speaker embedding
+            spkr_emb = spkr_emb[0].cuda(non_blocking=True)
             allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
         else:
             # without speaker embedding
@@ -171,7 +157,6 @@ def valStep(dataLoader,
 
         sequence = sequence.cuda(non_blocking=True)
         label = label.cuda(non_blocking=True)
-        spkr_emb = spkr_emb[0].cuda(non_blocking=True)
 
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
         label = torch.cat([label, label])
@@ -187,6 +172,7 @@ def valStep(dataLoader,
 
             if len(spkr_emb) != 0:
                 # with speaker embedding
+                spkr_emb = spkr_emb[0].cuda(non_blocking=True)
                 allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
             else:
                 # without speaker embedding
@@ -210,7 +196,6 @@ def run(trainDataset,
         valDataset,
         batchSize,
         samplingMode,
-        balance_sampler,
         cpcModel,
         cpcCriterion,
         nEpoch,
@@ -218,7 +203,6 @@ def run(trainDataset,
         optimizer,
         scheduler,
         logs,
-        clustering,
         no_artefacts,
         n_choose_amongst,
         batchSizePerGPU,
@@ -237,7 +221,6 @@ def run(trainDataset,
 
         trainLoader = trainDataset.getDataLoader(batchSize, samplingMode,
                                                  True, numWorkers=0,
-                                                 balance_sampler=balance_sampler,
                                                  remove_artefacts=no_artefacts,
                                                  n_choose_amongst=n_choose_amongst,
                                                  batch_size_per_gpu=batchSizePerGPU,
@@ -455,6 +438,8 @@ def main(argv):
         if not os.path.isdir(args.pathCheckpoint):
             os.mkdir(args.pathCheckpoint)
         args.pathCheckpoint = os.path.join(args.pathCheckpoint, "checkpoint")
+        with open(args.pathCheckpoint + "_args.json", 'w') as file:
+            json.dump(vars(args), file, indent=2)
 
     scheduler = None
     if args.schedulerStep > 0:
@@ -529,9 +514,6 @@ def parseArgs(argv):
     group_db.add_argument('--max_size_loaded', type=int, default=4000000000,
                           help='Maximal amount of data (in byte) a dataset '
                           'can hold in memory at any given time')
-    group_db.add_argument('--balance_type', type=str, default=None,
-                         choices=['linear', 'log', 'pow'])
-    group_db.add_argument('--balance_coeff', type=float, default=0.5)
     group_supervised = parser.add_argument_group(
         'Supervised mode (depreciated)')
     group_supervised.add_argument('--supervised', action='store_true',

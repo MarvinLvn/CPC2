@@ -294,26 +294,22 @@ class AudioBatchData(Dataset):
         return len(self.packageIndex)
 
     def getBaseSampler(self, type, batchSize,
-                       offset, balance_sampler=None,
-                       n_choose_amongst=None,
+                       offset, n_choose_amongst=None,
                        batchSizePerGPU=None,
                        minibatch_wise=False):
 
         if type == "samespeaker":
             return SameSpeakerSampler(batchSize, self.speakerLabel,
                                       self.sizeWindow, offset,
-                                      balance_sampler=balance_sampler,
                                       n_choose_amongst=n_choose_amongst)
         if type == "samesequence":
             return SameSpeakerSampler(batchSize, self.seqLabel,
                                       self.sizeWindow, offset,
-                                      balance_sampler=balance_sampler,
                                       n_choose_amongst=n_choose_amongst)
         if type == "temporalsamespeaker":
             return TemporalSameSpeakerSampler(batchSize,
                                               self.speakerLabel,
                                               self.sizeWindow, offset,
-                                              balance_sampler=balance_sampler,
                                               n_choose_amongst=n_choose_amongst,
                                               batchSizePerGPU=batchSizePerGPU,
                                               minibatch_wise=minibatch_wise)
@@ -329,7 +325,7 @@ class AudioBatchData(Dataset):
         raise ValueError("--samplingType should belong to %s" % ["samespeaker", "samesequence", "temporalsamespeaker", "sequential", "uniform"])
 
     def getDataLoader(self, batchSize, type, randomOffset, numWorkers=0,
-                      onLoop=-1, nLoops = -1, balance_sampler=None, remove_artefacts=False,
+                      onLoop=-1, nLoops = -1, remove_artefacts=False,
                       n_choose_amongst=None, batch_size_per_gpu=None, minibatch_wise=False):
         r"""
         Get a batch sampler for the current dataset.
@@ -374,8 +370,8 @@ class AudioBatchData(Dataset):
                     offset = random.randint(0, self.sizeWindow // 2)
             else:
                 offset = 0
-            return self.getBaseSampler(type, batchSize, offset, balance_sampler,
-                                       n_choose_amongst, batch_size_per_gpu, minibatch_wise)
+            return self.getBaseSampler(type, batchSize, offset, n_choose_amongst,
+                                       batch_size_per_gpu, minibatch_wise)
 
         return AudioLoader(self, samplerCall, nLoops, self.loadNextPack,
                            totSize, numWorkers, remove_artefacts, n_choose_amongst)
@@ -717,7 +713,6 @@ class TemporalSameSpeakerSampler(Sampler):
                  samplingIntervals,
                  sizeWindow,
                  offset,
-                 balance_sampler=None,
                  n_choose_amongst=None,
                  batchSizePerGPU=None,
                  minibatch_wise=False):
@@ -725,7 +720,6 @@ class TemporalSameSpeakerSampler(Sampler):
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
         self.offset = offset
-        self.balance_sampler = balance_sampler
         self.n_choose_amongst = n_choose_amongst
         self.batchSizePerGPU = batchSizePerGPU
         self.minibatch_wise = minibatch_wise
@@ -775,17 +769,12 @@ class TemporalSameSpeakerSampler(Sampler):
         return range(beg, beg + self.sizeWindow * self.batchSize, self.sizeWindow)
 
     def __iter__(self):
-        if self.balance_sampler is not None:
-            self.build_batches()
         random.shuffle(self.batches)
         return iter(self.batches)
 
     def build_batches(self):
-        if self.balance_sampler is not None:
-            order = self.get_balanced_sampling()
-        else:
-            order = [(x, torch.randperm(val).tolist())
-                     for x, val in enumerate(self.sizeSamplers) if val > 0]
+        order = [(x, torch.randperm(val).tolist())
+                 for x, val in enumerate(self.sizeSamplers) if val > 0]
 
         # Build batches (or minibatches depending on the config)
         batches = []
@@ -811,27 +800,6 @@ class TemporalSameSpeakerSampler(Sampler):
         else:
             self.batches = batches
 
-    def get_balanced_sampling(self):
-        # untested
-        target_weights = self.balance_sampler(self.sizeSamplers)
-        order = []
-        for x, val in enumerate(self.sizeSamplers):
-            if val <= 0:
-                continue
-            to_take = target_weights[x] #int(target_val *self.balance_coeff + (1-self.balance_coeff) * val)
-            took = 0
-            speaker_batch = []
-            while took < to_take:
-                remainer = to_take - took
-                batch = torch.randperm(val).tolist()
-                if remainer < val:
-                    batch = batch[:remainer]
-                took+= len(batch)
-                speaker_batch+= batch
-            order.append((x,speaker_batch))
-        return order
-
-
 class SameSpeakerSampler(Sampler):
 
     def __init__(self,
@@ -839,14 +807,12 @@ class SameSpeakerSampler(Sampler):
                  samplingIntervals,
                  sizeWindow,
                  offset,
-                 balance_sampler=None,
                  n_choose_amongst=None):
 
         self.samplingIntervals = samplingIntervals
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
         self.offset = offset
-        self.balance_sampler = balance_sampler
         self.n_choose_amongst = n_choose_amongst
 
         if self.n_choose_amongst is not None:
@@ -875,17 +841,12 @@ class SameSpeakerSampler(Sampler):
             + self.samplingIntervals[iInterval]
 
     def __iter__(self):
-        if self.balance_sampler is not None:
-            self.build_batches()
         random.shuffle(self.batches)
         return iter(self.batches)
 
     def build_batches(self):
-        if self.balance_sampler is not None:
-            order = self.get_balanced_sampling()
-        else:
-            order = [(x, torch.randperm(val).tolist())
-                     for x, val in enumerate(self.sizeSamplers) if val > 0]
+        order = [(x, torch.randperm(val).tolist())
+                 for x, val in enumerate(self.sizeSamplers) if val > 0]
 
         # Build Batches
         self.batches = []
@@ -898,30 +859,10 @@ class SameSpeakerSampler(Sampler):
                 indexStart = indexEnd
                 self.batches.append(locBatch)
 
-    def get_balanced_sampling(self):
-
-        target_weights = self.balance_sampler(self.sizeSamplers)
-        order = []
-        for x, val in enumerate(self.sizeSamplers):
-            if val <= 0:
-                continue
-            to_take = target_weights[x] #int(target_val *self.balance_coeff + (1-self.balance_coeff) * val)
-            took = 0
-            speaker_batch = []
-            while took < to_take:
-                remainer = to_take - took
-                batch = torch.randperm(val).tolist()
-                if remainer < val:
-                    batch = batch[:remainer]
-                took+= len(batch)
-                speaker_batch+= batch
-            order.append((x,speaker_batch))
-        return order
-
-
 def extractLength(couple):
     speaker, locPath = couple
-    return torchaudio.info(str(locPath)).num_frames
+    info = torchaudio.info(str(locPath))[0]
+    return info.length
 
 
 def findAllSeqs(dirName,

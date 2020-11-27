@@ -158,6 +158,7 @@ def loadSupervisedCriterion(pathCheckpoint):
 
 
 def getCheckpointData(pathDir):
+
     if not os.path.isdir(pathDir):
         return None
     checkpoints = [x for x in os.listdir(pathDir)
@@ -168,6 +169,7 @@ def getCheckpointData(pathDir):
         return None
     checkpoints.sort(key=lambda x: int(os.path.splitext(x[11:])[0]))
     data = os.path.join(pathDir, checkpoints[-1])
+
     with open(os.path.join(pathDir, 'checkpoint_logs.json'), 'rb') as file:
         logs = json.load(file)
 
