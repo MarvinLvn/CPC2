@@ -21,7 +21,7 @@ from cpc.data_augmentation import augmentation_factory
 from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
     PeakNorm
 
-#torch.multiprocessing.set_sharing_strategy('file_system')
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 def getCriterion(args, downsampling, nSpeakers, nPhones):
     dimFeatures = args.hiddenGar if not args.onEncoder else args.hiddenEncoder
@@ -115,6 +115,16 @@ def trainStep(dataLoader,
         optimizer.step()
         optimizer.zero_grad()
 
+        # just a test to be deleted
+        del full_data
+        del sequence
+        del label
+        del past
+        del future
+        del combined
+        del c_feature
+        del encoded_data
+
         if allLosses.nelement() > 0:
             if "locLoss_train" not in logs:
                 logs["locLoss_train"] = np.zeros(allLosses.size(1))
@@ -182,6 +192,16 @@ def valStep(dataLoader,
             else:
                 # without speaker embedding
                 allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
+
+        # just a test to be deleted
+        del full_data
+        del sequence
+        del label
+        del past
+        del future
+        del combined
+        del c_feature
+        del encoded_data
 
         if "locLoss_val" not in logs:
             logs["locLoss_val"] = np.zeros(allLosses.size(1))
