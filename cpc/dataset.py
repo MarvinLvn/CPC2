@@ -251,7 +251,6 @@ class AudioBatchData(Dataset):
         if idx < 0 or idx >= len(self.data) - self.sizeWindow - 1:
             print(idx)
             print("upper bound %d" % (len(self.data) - self.sizeWindow - 1))
-            raise ValueError("too high")
         outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
 
         label = torch.tensor(self.getSpeakerLabel(idx), dtype=torch.long)
