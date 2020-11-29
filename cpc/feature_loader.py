@@ -224,7 +224,6 @@ def loadModel(pathCheckpoints, loadStateDict=True, intermediate_idx=0):
     hiddenGar, hiddenEncoder = 0, 0
     for path in pathCheckpoints:
         print(f"Loading checkpoint {path}")
-        print(pathCheckpoints)
         _, _, locArgs = getCheckpointData(os.path.dirname(path))
 
         if intermediate_idx != 0:
