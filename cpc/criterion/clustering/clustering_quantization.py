@@ -205,7 +205,9 @@ def main(argv):
     else:
         intermediate_idx = 0
 
-    model = loadModel([clustering_args.pathCheckpoint],False, intermediate_idx=intermediate_idx)[0]
+
+    model = loadModel([clustering_args.pathCheckpoint], intermediate_idx=intermediate_idx)[0]
+
     ## If we don't apply batch implementation, we can set LSTM model to keep hidden units
     ## making the quality of the quantized units better
     if args.nobatch:

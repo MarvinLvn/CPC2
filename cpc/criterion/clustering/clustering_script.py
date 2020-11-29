@@ -32,7 +32,7 @@ def parseArgs(argv):
     parser.add_argument('-g',  '--nGroups', type=int, default=1,
                         help="Number of groups for kmeans algorithm (default: 1).")
     parser.add_argument('-n', '--MAX_ITER', type=int, default=100,
-                        help="Number of iterations (default: 150).")
+                        help="Number of iterations (default: 100).")
     parser.add_argument('--recursionLevel', type=int, default=2,
                         help="The speaker recursionLevel in the training dataset (default: 2).")
     parser.add_argument('--extension', type=str, default='.flac',
