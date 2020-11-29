@@ -4,12 +4,13 @@ import os
 import sys
 from pathlib import Path
 from time import time
+import torch
 
 import progressbar
 import torch
 from cpc.criterion.clustering import kMeanCluster
 from cpc.dataset import findAllSeqs
-from cpc.feature_loader import buildFeature, FeatureModule, loadModel, buildFeature_batch
+from cpc.feature_loader import buildFeature, FeatureModule, loadModel, buildFeature_batch, toOneHot
 
 
 def readArgs(pathArgs):
@@ -48,16 +49,15 @@ def quantize_file(file_path, cpc_feature_function, clusterModule):
             clusterModule = clusterModule.cuda()
     else:
         qFeatures = torch.argmin(clusterModule(cFeatures), dim=-1)
-    qFeatures = qFeatures[0].detach().cpu().numpy()
 
-    # Transform to quantized line
-    quantLine = ",".join(["-".join([str(i) for i in item]) for item in qFeatures.reshape(-1, nGroups)])
-
-    return quantLine
+    qFeatures_one_hot = toOneHot(qFeatures, nItems=clusterModule.k)
+    qFeatures_one_hot = qFeatures_one_hot.squeeze(0)
+    return qFeatures_one_hot
 
 def parseArgs(argv):
     # Run parameters
-    parser = argparse.ArgumentParser(description='Quantize audio files using CPC Clustering Module.')
+    parser = argparse.ArgumentParser(description='Quantize audio files using CPC Clustering Module. Save the embeddings'
+                                                 'under .pt format.')
     parser.add_argument('pathClusteringCheckpoint', type=str,
                         help='Path to the clustering checkpoint.')
     parser.add_argument('pathDB', type=str,
@@ -151,8 +151,7 @@ def main(argv):
         nameOutput = "quantized_outputs.txt"
     else:
         nameOutput = f"quantized_outputs_split_{idx_split}-{num_splits}.txt"
-    outputFile = os.path.join(args.pathOutputDir, nameOutput)
-    
+
     # Get splits
     if args.split:
         startIdx = len(seqNames) // num_splits * (idx_split-1)
@@ -171,21 +170,6 @@ def main(argv):
         print(f"Debug mode activated, only load {nsamples} samples!")
         # shuffle(seqNames)
         seqNames = seqNames[:nsamples]
-
-    # Continue
-    addEndLine = False # to add end line (\n) to first line or not
-    if args.resume:
-        if os.path.exists(outputFile):
-            with open(outputFile, 'r') as f:
-                lines = [line for line in f]
-            existing_files = set([x.split()[0] for x in lines if x.split()])
-            seqNames = [s for s in seqNames if os.path.splitext(s[1].split('/')[-1])[0] not in existing_files]
-            print(f"Found existing output file, continue to quantize {len(seqNames)} audio files left!")
-            if len(lines) > 0 and not lines[-1].endswith("\n"):
-                addEndLine = True
-    else:
-        assert not os.path.exists(outputFile), \
-            f"Output file {outputFile} already exists !!! If you want to continue quantizing audio files, please check the --resume option."
 
     assert len(seqNames) > 0, \
         "No file to be quantized!"
@@ -217,10 +201,11 @@ def main(argv):
     assert os.path.exists(clustering_args.pathCheckpoint), \
         f"CPC path at {clustering_args.pathCheckpoint} does not exist!!"
     if 'level_gru' in vars(clustering_args) and clustering_args.level_gru is not None:
-        updateConfig = argparse.Namespace(nLevelsGRU=clustering_args.level_gru)
+        intermediate_idx = clustering_args.level_gru
     else:
-        updateConfig = None
-    model = loadModel([clustering_args.pathCheckpoint], updateConfig=updateConfig)[0]
+        intermediate_idx = 0
+
+    model = loadModel([clustering_args.pathCheckpoint],False, intermediate_idx=intermediate_idx)[0]
     ## If we don't apply batch implementation, we can set LSTM model to keep hidden units
     ## making the quality of the quantized units better
     if args.nobatch:
@@ -248,8 +233,7 @@ def main(argv):
 
     # Quantization of files
     print("")
-    print(f"Quantizing audio files and saving outputs to {outputFile}...")
-    f = open(outputFile, "a")
+    print(f"Quantizing audio files and saving outputs to {args.pathOutputDir}...")
     bar = progressbar.ProgressBar(maxval=len(seqNames))
     bar.start()
     start_time = time()
@@ -260,16 +244,11 @@ def main(argv):
         file_path = os.path.join(args.pathDB, file_path)
 
         # Quantizing
-        quantLine = quantize_file(file_path, cpc_feature_function, clusterModule)
+        quant_data = quantize_file(file_path, cpc_feature_function, clusterModule)
 
-        # Save the outputs
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
-        outLine = "\t".join([file_name, quantLine])
-        if addEndLine:
-            f.write("\n"+outLine)
-        else:
-            f.write(outLine)
-            addEndLine = True
+        # Save the outputs (.pt format)
+        outputFile = os.path.join(args.pathOutputDir, os.path.basename(file_path).replace(args.file_extension, ".pt"))
+        torch.save(quant_data, outputFile)
     bar.finish()
     print(f"...done {len(seqNames)} files in {time()-start_time} seconds.")
     f.close()
