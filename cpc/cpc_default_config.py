@@ -130,10 +130,9 @@ def set_default_cpc_config(parser):
     group.add_argument('--n_skipped', type=int, default=0,
                                help="Number of time steps that will be skipped in the prediction task.")
     group.add_argument('--minibatch_wise', action='store_true', default=False,
-                               help="If, true, all the processes will be done minibatch wise instead of batch wise "
-                                    "(only works if temporal sampling is activated) : 8 consecutive sequences per minibatch"
-                                    "instead of 64 per batch, etc.")
-
+                               help="If, true, will sample sequences minibatch wise"
+                                    "(only works if temporal sampling is activated) : 8 consecutive sequences"
+                                    "8 per minibatch instead of 64 per batch, etc.")
     group_augment = parser.add_argument_group('Data augmentation configuration',
                                       description="The arguments defining the "
                                       "data augmentation.")
@@ -141,13 +140,34 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--augment_future', action='store_true')
     group_augment.add_argument('--augment_past', action='store_true')
     group_augment.add_argument('--augment_type', type=str, choices=['none', 'bandreject', 'pitch',
-                                         'pitch_dropout', 'pitch_quick',
-                                         'additive', 'reverb', 'time_dropout',
-                                         'reverb_dropout'], nargs='+')
+                                         'pitch_deropout', 'pitch_quick',
+                                         'additive', 'artificial_reverb', 'time_dropout',
+                                         'artificial_reverb_dropout', 'natural_reverb'], nargs='+')
     group_augment.add_argument('--bandreject_scaler', type=float, default=1.0)
-    group_augment.add_argument('--additive_noise_snr', type=float, default=15.0)
     group_augment.add_argument('--t_ms', type=int, default=100)
     group_augment.add_argument('--pathDBNoise', type=str, default=None)
     group_augment.add_argument('--pathSeqNoise', type=str, default=None)
+    group_augment.add_argument('--past_equal_future', action='store_true',
+                               help="If activated, will apply the same data augmentation to past and future"
+                                    "sequences")
+    group_augment.add_argument('--pathImpulseResponses', type=str, default=None)
+    group_augment.add_argument('--impulse_response_prob', type=float, default=1.0)
+    group_augment.add_argument('--min_snr_in_db', type=float, default=5.0)
+    group_augment.add_argument('--max_snr_in_db', type=float, default=20.0)
+    group_augment.add_argument('--ir_sample_rate', type=int, default=32000,
+                               help="Sample rate of the impulse responses. (Default to 32000)")
+    group_augment.add_argument('--temporal_additive_noise', action='store_true',
+                               help="If activated, will sample noise sequences in temporal order.")
+    group_augment.add_argument('--meta_aug', action='store_true',
+                               help="If activated, will augment noise sequences.")
+    group_augment.add_argument('--meta_aug_type',  type=str, choices=['none', 'natural_reverb'], nargs='+',
+                               help="Indicates which types of data augmented need to be applied on noise sequences"\
+                                    "(from MUSAN or custom databases")
+    group_augment.add_argument('--ir_batch_wise', action='store_true',
+                               help="If activated, will apply the natural reverb at the batch level"
+                                    "(same impulse response for the whole batch)")
+    group_augment.add_argument('--meta_ir_batch_wise', action='store_true',
+                               help="If activated, will apply the natural reverb on the noise sequences "
+                                    "at the batch level (same impulse response for the whole batch)")
 
     return parser

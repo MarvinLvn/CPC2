@@ -19,7 +19,6 @@ from torch.multiprocessing import Pool
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import Sampler, BatchSampler
 
-
 class AudioBatchData(Dataset):
 
     def __init__(self,
@@ -36,7 +35,8 @@ class AudioBatchData(Dataset):
                  augmentation=None,
                  keep_temporality=True,
                  speaker_embedding=None,
-                 speaker_embedding_step=0.01):
+                 speaker_embedding_step=0.01,
+                 past_equal_future=False):
         """
         Args:
             - path (string): path to the training dataset
@@ -92,6 +92,11 @@ class AudioBatchData(Dataset):
         self.augment_past = augment_past
         self.augment_future = augment_future
         self.augmentation = augmentation
+        self.past_equal_future = past_equal_future
+
+        if self.past_equal_future and not self.augment_past:
+            raise ValueError("Can only apply the same transformation on past and future sequences,"
+                             "when past sequence is augmented. Here --augment_past = False")
 
     def resetPhoneLabels(self, newPhoneLabels, step):
         self.phoneSize = step
@@ -265,10 +270,16 @@ class AudioBatchData(Dataset):
             outData = self.transform(outData)
 
         x1, x2 = outData, outData
+        # Past augmentation only
         if self.augment_past and self.augmentation:
             x1 = self.augmentation(x1)
-        if self.augment_future and self.augmentation:
+
+        # And/or future augmentation
+        if not self.past_equal_future and self.augment_future and self.augmentation:
             x2 = self.augmentation(x2)
+        # If past_equal_future is activated, apply the same transformation to past and future
+        if self.past_equal_future:
+            x2 = x1
 
         x1, x2 = x1.unsqueeze(0), x2.unsqueeze(0)
         outData = torch.cat([x1, x2], dim=0)
@@ -337,6 +348,7 @@ class AudioBatchData(Dataset):
                 type == "speaker": grouped sampler speaker-wise
                 type == "sequence": grouped sampler sequence-wise
                 type == "sequential": sequential sampling
+                type == "temporalsamespeaker": temporal same speaker sampling
                 else: uniform random sampling of the full audio
                 vector
             - randomOffset (bool): if True add a random offset to the sampler
@@ -850,13 +862,14 @@ class SameSpeakerSampler(Sampler):
         # Build Batches
         self.batches = []
         for indexSampler, randperm in order:
-            indexStart, sizeSampler = 0, len(randperm) #self.sizeSamplers[indexSampler]
+            indexStart, sizeSampler = 0, len(randperm)
             while indexStart < sizeSampler:
                 indexEnd = min(sizeSampler, indexStart + self.batchSize)
                 locBatch = [self.getIndex(x, indexSampler)
                             for x in randperm[indexStart:indexEnd]]
                 indexStart = indexEnd
                 self.batches.append(locBatch)
+
 
 def extractLength(couple):
     speaker, locPath = couple

@@ -335,6 +335,11 @@ def main(argv):
     else:
         seqTrain = seqNames
 
+    if len(seqTrain) == 0:
+        raise ValueError("No training sequences can be found. "
+                         "Please check that you provided the right path, "
+                         "and specified the right audio extension.")
+
     if args.pathVal is None:
         print('No validation data specified!')
         random.shuffle(seqTrain)
@@ -360,9 +365,9 @@ def main(argv):
 
     if args.pathDBNoise is not None and (args.augment_past or args.augment_future):
         seqNoise, _ = findAllSeqs(args.pathDBNoise,
-                                   extension=args.noise_extension,
-                                   loadCache=not args.ignore_cache,
-                                   speaker_level=0)
+                                  extension=args.noise_extension,
+                                  loadCache=not args.ignore_cache,
+                                  speaker_level=0)
         if args.pathSeqNoise is not None:
             seqNoise = filterSeqs(args.pathSeqNoise, seqNoise)
         if args.debug:
@@ -370,11 +375,21 @@ def main(argv):
 
         print(f'\nLoading noise data at {args.pathDBNoise}')
         print("Loading the noise dataset")
-        noiseDataset = AudioBatchData(args.pathDBNoise, args.sizeWindow,
-                                       seqNoise, None, 1,
-                                       transform=PeakNorm(),
-                                       nProcessLoader=args.n_process_loader,
-                                       MAX_SIZE_LOADED=args.max_size_loaded)
+        noiseDataset = AudioBatchData(args.pathDBNoise,
+                                      args.sizeWindow,
+                                      seqNoise,
+                                      None,
+                                      1,
+                                      transform=PeakNorm(),
+                                      nProcessLoader=args.n_process_loader,
+                                      MAX_SIZE_LOADED=args.max_size_loaded,
+                                      augment_future=False,
+                                      augment_past=args.meta_aug,
+                                      augmentation=augmentation_factory(args, noiseDataset, applied_on_noise=True),
+                                      keep_temporality=args.naming_convention == "id_spkr_onset_offset",
+                                      past_equal_future=args.meta_aug
+                                      )
+
 
     print(f'\nLoading audio data at {args.pathDB}')
     print("Loading the training dataset")
@@ -390,7 +405,8 @@ def main(argv):
                                   augmentation=augmentation_factory(args, noiseDataset),
                                   keep_temporality=args.naming_convention == "id_spkr_onset_offset",
                                   speaker_embedding=args.speakerEmbedding,
-                                  speaker_embedding_step=args.speakerEmbeddingStep)
+                                  speaker_embedding_step=args.speakerEmbeddingStep,
+                                  past_equal_future=args.past_equal_future)
 
     print("Training dataset loaded\n")
 
@@ -616,6 +632,12 @@ def parseArgs(argv):
     if args.speakerEmbedding is None and (args.concatenate_spkr_emb or (args.n_choose_amongst is not None)):
         raise ValueError("You have activated args.concatenate_spkr_emb or args.n_choose_amongst but "
                          "haven't specified args.speakerEmbedding")
+
+    if not args.meta_aug and (args.meta_aug_type is not None or args.meta_aug_type == "none"):
+        raise ValueError("You specified parameters --meta_aug_type without having activated --meta_aug flag.")
+
+    if args.meta_aug and args.meta_aug_type is None or args.meta_aug_type == "none":
+        raise ValueError("You specified flag --meta_aug, but you haven't specified meta_aug_type")
 
     if args.pathCheckpoint is not None:
         args.pathCheckpoint = os.path.abspath(args.pathCheckpoint)
