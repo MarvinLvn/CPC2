@@ -167,12 +167,9 @@ class AdditiveNoiseAugment:
         self.get_next_batch()
 
         # to be deleted
-        # self.snr_min = 0
-        # self.snr_max = 0
-        # self.nb_calls = 0
-        # self.speech_batch = torch.empty(0)
-        # self.noise_batch = torch.empty(0)
-        # self.augmented_speech_batch = torch.empty(0)
+        #self.speech_batch = torch.empty(0)
+        #self.noise_batch = torch.empty(0)
+        #self.augmented_speech_batch = torch.empty(0)
 
     def update_noise_loader(self):
         # Artefacts removal not yet available for uniform sampling
@@ -192,16 +189,17 @@ class AdditiveNoiseAugment:
         nb_remaining_noise_sequences = self.current_noise_batch.shape[0]
         if nb_remaining_noise_sequences == 0:
             self.get_next_batch()
-            # suffixe = "without_reverb"
-            # torchaudio.save("/home/engaclew/Documents/test_augment/noise_batch_%s.wav" % suffixe, self.noise_batch, sample_rate=16000)
-            # torchaudio.save("/home/engaclew/Documents/test_augment/speech_batch_%s.wav" % suffixe, self.speech_batch, sample_rate=16000)
-            # torchaudio.save("/home/engaclew/Documents/test_augment/augmented_speech_batch_snr_min_%d_snr_max_%d_%s.wav" % (self.snr_min, self.snr_max,
-            #                                                                                                                suffixe), self.augmented_speech_batch,
-            #                 sample_rate=16000)
-            #
-            # self.speech_batch = torch.empty(0)
-            # self.noise_batch = torch.empty(0)
-            # self.augmented_speech_batch = torch.empty(0)
+            #suffixe = "with_reverb"
+            #torchaudio.save("/private/home/marvinlvn/Downloads/check_audio/noise_batch_%s.wav" % suffixe, self.noise_batch, sample_rate=16000)
+            #torchaudio.save("/private/home/marvinlvn/Downloads/check_audio/speech_batch_%s.wav" % suffixe, self.speech_batch, sample_rate=16000)
+            #torchaudio.save("/private/home/marvinlvn/Downloads/check_audio/augmented_speech_batch_snr_min_%d_snr_max_%d_%s.wav" % (self.snr_min, self.snr_max,
+            #                                                                                                               suffixe), self.augmented_speech_batch,
+            #                sample_rate=16000)
+            
+            #self.speech_batch = torch.empty(0)
+            #self.noise_batch = torch.empty(0)
+            #self.augmented_speech_batch = torch.empty(0)
+            #exit()
 
         # Get noise sequence
         noise_sequence = self.current_noise_batch[0, 0, ...]
@@ -224,10 +222,9 @@ class AdditiveNoiseAugment:
         noised = peak_normalization(energy_normalization(x) + energy_normalization(noise) * noise_rms)
 
         # to be deleted
-        # self.speech_batch = torch.cat((self.speech_batch, peak_normalization(x)), axis=1)
-        # self.noise_batch = torch.cat((self.noise_batch, peak_normalization(noise)), axis=1)
-        # self.augmented_speech_batch = torch.cat((self.augmented_speech_batch, noised), axis=1)
-        # self.nb_calls += 1
+        #self.speech_batch = torch.cat((self.speech_batch, peak_normalization(x)), axis=1)
+        #self.noise_batch = torch.cat((self.noise_batch, peak_normalization(noise)), axis=1)
+        #self.augmented_speech_batch = torch.cat((self.augmented_speech_batch, noised), axis=1)
 
         return noised
 

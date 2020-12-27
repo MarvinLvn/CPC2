@@ -13,6 +13,8 @@ dependencies:
   - openblas-devel
   - tqdm
   - nose
+  - librosa
+  - pysoundfile
   - cython
   - sox
   - pip:
