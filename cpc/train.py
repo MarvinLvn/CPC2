@@ -345,7 +345,21 @@ def main(argv):
 
     if args.pathVal is None:
         print('No validation data specified!')
-        random.shuffle(seqTrain)
+        if args.samplingType == "temporalsamespeaker":
+            # Shuffle by blocks so that we keep temporality
+            seqTrain_by_blocks = []
+            curr_seq_id = None
+            for seq_id, seq_path in seqTrain:
+                if curr_seq_id != seq_id:
+                    seqTrain_by_blocks.append([(seq_id, seq_path)])
+                    curr_seq_id = seq_id
+                else:
+                    seqTrain_by_blocks[-1].append((seq_id, seq_path))
+            random.shuffle(seqTrain_by_blocks)
+            seqTrain = [item for sublist in seqTrain_by_blocks for item in sublist]
+        else:
+            random.shuffle(seqTrain)
+
         sizeTrain = int(0.95 * len(seqTrain))
         seqTrain, seqVal = seqTrain[:sizeTrain], seqTrain[sizeTrain:]
         print(f'Found files: {len(seqTrain)} train, {len(seqVal)} val')
@@ -617,10 +631,6 @@ def parseArgs(argv):
         raise ValueError("Can not apply temporal sampling (with same speaker) if pathTrain or pathVal is specified.\n"
                          "This is because temporality must be kept (sequences are loaded in temporal order), and splitting "
                          "the utterances might break the temporality.")
-
-    if args.samplingType == "temporalsamespeaker" and not args.ignore_cache:
-        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True "
-                         "as this mode is not compatible with other sampling methods")
 
     if args.samplingType == "temporalsamespeaker" and \
             (args.naming_convention != "id_spkr_onset_offset" and args.naming_convention != "spkr-id"):
