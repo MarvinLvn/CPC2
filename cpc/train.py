@@ -313,6 +313,9 @@ def main(argv):
 
     logs["logging_step"] = args.logging_step
 
+    if args.nGPU == 0:
+        args.nGPU = 1
+
     if args.speakerEmbedding is not None and not os.path.exists(args.speakerEmbedding):
         raise ValueError("%s can't be found. Are you sure you provided the right location ?" % args.speakerEmbedding)
 
@@ -366,7 +369,7 @@ def main(argv):
     if args.pathDBNoise is not None and (args.augment_past or args.augment_future):
         seqNoise, _ = findAllSeqs(args.pathDBNoise,
                                   extension=args.noise_extension,
-                                  loadCache=not args.ignore_cache,
+                                  loadCache=True,
                                   speaker_level=0)
         if args.pathSeqNoise is not None:
             seqNoise = filterSeqs(args.pathSeqNoise, seqNoise)
@@ -441,6 +444,7 @@ def main(argv):
             cpcModel.supervised = args.supervised
         else:
             cpcModel = model.CPCModel(encoderNet, arNet, args.mask_prob, args.mask_length)
+
 
     batchSize = args.nGPU * args.batchSizeGPU
     cpcModel.supervised = args.supervised
