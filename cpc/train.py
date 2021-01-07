@@ -21,7 +21,7 @@ from cpc.data_augmentation import augmentation_factory
 from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
     PeakNorm
 
-torch.multiprocessing.set_sharing_strategy('file_system')
+#torch.multiprocessing.set_sharing_strategy('file_system')
 
 def getCriterion(args, downsampling, nSpeakers, nPhones):
     dimFeatures = args.hiddenGar if not args.onEncoder else args.hiddenEncoder
@@ -307,7 +307,7 @@ def main(argv):
                         forbiddenAttr={"nGPU", "pathCheckpoint",
                                        "debug", "restart", "world_size",
                                        "n_nodes", "node_id", "n_gpu_per_node",
-                                       "max_size_loaded"})
+                                       "max_size_loaded", "nEpoch"})
             args.load, loadOptimizer = [data], True
             args.loadCriterion = True
 
