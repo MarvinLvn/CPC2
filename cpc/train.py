@@ -307,7 +307,7 @@ def main(argv):
                         forbiddenAttr={"nGPU", "pathCheckpoint",
                                        "debug", "restart", "world_size",
                                        "n_nodes", "node_id", "n_gpu_per_node",
-                                       "max_size_loaded", "nEpoch"})
+                                       "max_size_loaded", "nEpoch", "save_step"})
             args.load, loadOptimizer = [data], True
             args.loadCriterion = True
 
