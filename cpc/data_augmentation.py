@@ -90,7 +90,7 @@ class PitchAugment:
                     'bits_per_sample': 32}
 
         y = self.effect.apply(x, src_info=src_info, target_info=target_info)
-
+        
         if torch.isnan(y).any() or torch.isinf(y).any():
             return x.clone()
 
@@ -357,7 +357,7 @@ def get_augment(augment_type, **kwargs):
                                     kwargs['additive_noise_snr_max'], kwargs['batchSize'],
                                     kwargs['additive_noise_sampling'])
     elif augment_type == 'pitch':
-        return PitchAugment(quick=kwargs['pitch_quick'])
+        return PitchAugment(quick=kwargs['pitch_quick'], shift_max=kwargs['shift_max'])
     elif augment_type == 'artificial_reverb':
         return ReverbAugment()
     elif augment_type == 'time_dropout':
@@ -367,7 +367,7 @@ def get_augment(augment_type, **kwargs):
     elif augment_type == 'random_noise':
         return RandomAdditiveNoiseAugment(kwargs['additive_noise_snr'])
     elif augment_type == 'pitch_dropout':
-        return PitchDropout(kwargs['t_ms'])
+        return PitchDropout(kwargs['t_ms'], shift_max=kwargs['shift_max'])
     elif augment_type == 'natural_reverb':
 
         return NaturalReverb(ir_paths=kwargs['pathImpulseResponses'],
@@ -409,7 +409,8 @@ def augmentation_factory(args, noise_dataset=None, applied_on_noise=False):
                     "pathImpulseResponses": args.pathImpulseResponses,
                     "ir_sample_rate": args.ir_sample_rate,
                     "batchSize": batchSize,
-                    "ir_batch_wise": ir_batch_wise}
+                    "ir_batch_wise": ir_batch_wise,
+                    "shift_max": args.shift_max}
 
         return CombinedTransforms(augment_type, **aug_args)
     else:
@@ -418,7 +419,7 @@ def augmentation_factory(args, noise_dataset=None, applied_on_noise=False):
     if augment_type == 'bandreject':
         return BandrejectAugment(scaler=args.bandreject_scaler)
     elif augment_type in ['pitch', 'pitch_quick']:
-        return PitchAugment(quick=args.augment_type == 'pitch_quick')
+        return PitchAugment(quick=args.augment_type == 'pitch_quick', shift_max=args.shift_max)
     elif augment_type == 'artificial_reverb':
         return ReverbAugment()
     elif augment_type == 'time_dropout':
@@ -430,7 +431,7 @@ def augmentation_factory(args, noise_dataset=None, applied_on_noise=False):
     elif augment_type == 'artificial_reverb_dropout':
         return ReverbDropout(args.t_ms)
     elif augment_type == 'pitch_dropout':
-        return PitchDropout(args.t_ms)
+        return PitchDropout(args.t_ms, shift_max=args.shift_max)
     elif augment_type == 'natural_reverb':
 
         return NaturalReverb(ir_paths=args.pathImpulseResponses,

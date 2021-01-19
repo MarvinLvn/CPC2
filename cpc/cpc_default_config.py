@@ -152,6 +152,7 @@ def set_default_cpc_config(parser):
                                     "sequences")
     group_augment.add_argument('--pathImpulseResponses', type=str, default=None)
     group_augment.add_argument('--impulse_response_prob', type=float, default=1.0)
+    group_augment.add_argument('--shift_max', type=float, default=300)
     group_augment.add_argument('--min_snr_in_db', type=float, default=5.0)
     group_augment.add_argument('--max_snr_in_db', type=float, default=20.0)
     group_augment.add_argument('--ir_sample_rate', type=int, default=32000,
