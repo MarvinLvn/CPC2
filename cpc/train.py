@@ -403,7 +403,7 @@ def main(argv):
                                       augment_future=False,
                                       augment_past=args.meta_aug,
                                       augmentation=augmentation_factory(args, noiseDataset, applied_on_noise=True),
-                                      keep_temporality=args.naming_convention == "id_spkr_onset_offset",
+                                      keep_temporality=args.naming_convention.startswith("id_spkr_onset_offset"),
                                       past_equal_future=args.meta_aug
                                       )
 
@@ -420,7 +420,7 @@ def main(argv):
                                   augment_future=args.augment_future,
                                   augment_past=args.augment_past,
                                   augmentation=augmentation_factory(args, noiseDataset),
-                                  keep_temporality=args.naming_convention == "id_spkr_onset_offset",
+                                  keep_temporality=args.naming_convention.startswith("id_spkr_onset_offset"),
                                   speaker_embedding=args.speakerEmbedding,
                                   speaker_embedding_step=args.speakerEmbeddingStep,
                                   past_equal_future=args.past_equal_future)
@@ -633,7 +633,7 @@ def parseArgs(argv):
                          "the utterances might break the temporality.")
 
     if args.samplingType == "temporalsamespeaker" and \
-            (args.naming_convention != "id_spkr_onset_offset" and args.naming_convention != "spkr-id"):
+            ((not args.naming_convention.startswith("id_spkr_onset_offset")) and args.naming_convention != "spkr-id"):
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
                          "to id_spkr_onset_offset (daylong recordings) or spkr-id (librispeech) "
                          "as we need to sort the files temporally.")

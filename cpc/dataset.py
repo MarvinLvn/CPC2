@@ -954,6 +954,8 @@ def findAllSeqs(dirName,
                 if format is not None:
                     if format == "id_spkr_onset_offset":
                         idStr = '_'.join(filename.split('_')[0:-2])
+                    elif format == "id_spkr_onset_offset_spkr_onset_offset":
+                        idStr = '_'.join(filename.split('_')[0:-5])
                     elif format == "spkr-id":
                         idStr = '-'.join(filename.split('-')[0:2])
 
@@ -975,6 +977,12 @@ def findAllSeqs(dirName,
             splitted = filename.split('_')
             return '_'.join(splitted[0:-2]), float(splitted[-2])
 
+        def get_id_spkr_onset2(x):
+            # Returns (id_spkr, onset) tuple
+            filename = x[1]
+            splitted = filename.split('_')
+            return '_'.join(splitted[0:-5]), float(splitted[-5])
+
         def get_spkr_id(x):
             # Returns (spkr, id) tuple
             filename = x[1]
@@ -983,6 +991,8 @@ def findAllSeqs(dirName,
 
         if format == "id_spkr_onset_offset":
             sorting_func = get_id_spkr_onset
+        elif format == "id_spkr_onset_offset_spkr_onset_offset":
+            sorting_func = get_id_spkr_onset2
         elif format == "spkr-id":
             sorting_func = get_spkr_id
         outSequencesIds = sorted(outSequencesIds, key=sorting_func)

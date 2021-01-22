@@ -107,7 +107,7 @@ def set_default_cpc_config(parser):
     group.add_argument('--adapt_span_loss', type=float, default=2e-6)
     group.add_argument('--transformer_pruning', type=int, default=0)
     group.add_argument('--naming_convention', type=str, default=None,
-                               choices=[None, 'id_spkr_onset_offset', 'spkr-id'])
+                               choices=[None, 'id_spkr_onset_offset', 'spkr-id', 'id_spkr_onset_offset_spkr_onset_offset'])
     group.add_argument('--no_artefacts', action='store_true',
                                help="Avoid creating artefacts when building batches. "
                                     "If this option is activated, it will check for each sequence that the latter "
