@@ -155,7 +155,7 @@ def set_default_cpc_config(parser):
     group_augment.add_argument('--shift_max', type=float, default=300)
     group_augment.add_argument('--min_snr_in_db', type=float, default=5.0)
     group_augment.add_argument('--max_snr_in_db', type=float, default=20.0)
-    group_augment.add_argument('--ir_sample_rate', type=int, default=32000,
+    group_augment.add_argument('--ir_sample_rate', type=int, default=16000,
                                help="Sample rate of the impulse responses. (Default to 32000)")
     group_augment.add_argument('--temporal_additive_noise', action='store_true',
                                help="If activated, will sample noise sequences in temporal order.")
