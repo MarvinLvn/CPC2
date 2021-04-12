@@ -10,6 +10,8 @@ from torch_audiomentations import Compose, AddBackgroundNoise, ApplyImpulseRespo
 from cpc.dataset import findAllSeqs
 import os
 
+energy_normalization = lambda wav: wav / (torch.sqrt(torch.mean(wav ** 2)) + 1e-8)
+peak_normalization = lambda wav: wav / (wav.abs().max(dim=1, keepdim=True)[0] + 1e-8)
 
 class BandrejectAugment:
     def __init__(self, scaler=1.0):
@@ -209,9 +211,6 @@ class AdditiveNoiseAugment:
         return noise_sequence
 
     def __call__(self, x):
-        energy_normalization = lambda wav: wav / (torch.sqrt(torch.mean(wav ** 2)) + 1e-8)
-        peak_normalization = lambda wav: wav / (wav.abs().max(dim=1, keepdim=True)[0]+1e-8)
-
         noise = self.get_noise_sequence()
 
         # Compute weight associated to the noise sequence
@@ -308,7 +307,7 @@ class NaturalReverb:
 
     def __call__(self, x):
 
-        y = self.effect(x.view(1, 1, -1)).squeeze(0)
+        y = peak_normalization(self.effect(x.view(1, 1, -1)).squeeze(0))
 
         if self.batch_wise:
             self.count += 1

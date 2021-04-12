@@ -15,7 +15,7 @@ def normalize_with_singularity(x):
     cosine distance from any non-null vector.
     """
     N, S, H = x.size()
-    norm_x = (x**2).sum(dim=2, keepdim=True) + 1e-12
+    norm_x = (x**2).sum(dim=2, keepdim=True)
 
     x /= torch.sqrt(norm_x)
     zero_vals = (norm_x == 0).view(N, S)
@@ -24,7 +24,7 @@ def normalize_with_singularity(x):
                               dtype=x.dtype,
                               device=x.device) + 1e-12
     border_vect[zero_vals] = -2*1e12
-    return  torch.cat([x, border_vect], dim=2)
+    return torch.cat([x, border_vect], dim=2)
 
 
 def load_item_file(path_item_file):
@@ -169,6 +169,7 @@ class ABXFeatureLoader:
                 continue
 
             features = feature_maker(file_path)
+
             if normalize:
                 features = normalize_with_singularity(features)
 

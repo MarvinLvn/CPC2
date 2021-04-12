@@ -10,7 +10,7 @@ import argparse
 from .cpc_default_config import get_default_cpc_config
 from .dataset import parseSeqLabels
 from .model import CPCModel, ConcatenatedModel, CPCBertModel
-
+import pickle
 
 class FeatureModule(torch.nn.Module):
     r"""
@@ -18,23 +18,31 @@ class FeatureModule(torch.nn.Module):
     working with CPC trained features.
     """
 
-    def __init__(self, featureMaker, get_encoded, collapse=False):
+    def __init__(self, featureMaker, get_encoded, collapse=False, cca_projection=None):
         super(FeatureModule, self).__init__()
         self.get_encoded = get_encoded
         self.featureMaker = featureMaker
         self.collapse = collapse
+        self.cca_projection = None
+        if cca_projection:
+            assert cca_projection[-4:] == ".pkl"
+            print("Loading canonical correlation analysis model.")
+            with open(cca_projection, 'rb') as cca_file:
+                self.cca_projection = pickle.load(cca_file)
 
     def getDownsamplingFactor(self):
         return self.featureMaker.gEncoder.DOWNSAMPLING
 
     def forward(self, data):
-
         batchAudio, label = data
         cFeature, encoded, _ = self.featureMaker(batchAudio.cuda(), label)
         if self.get_encoded:
             cFeature = encoded
         if self.collapse:
             cFeature = cFeature.contiguous().view(-1, cFeature.size(2))
+        if self.cca_projection:
+            cFeature_np = self.cca_projection.transform(cFeature.cpu().numpy())
+            cFeature = torch.tensor(cFeature_np, dtype=cFeature.dtype, device=cFeature.device)
         return cFeature
 
 
@@ -333,6 +341,7 @@ def buildFeature(featureMaker, seqPath, strict=False,
             features = featureMaker((subseq, None))
             if seqNorm:
                 features = seqNormalization(features)
+
         out.append(features.detach().cpu())
         start += maxSizeSeq
 
@@ -342,10 +351,12 @@ def buildFeature(featureMaker, seqPath, strict=False,
             features = featureMaker((subseq, None))
             if seqNorm:
                 features = seqNormalization(features)
+
         delta = (sizeSeq - start) // featureMaker.getDownsamplingFactor()
         out.append(features[:, -delta:].detach().cpu())
 
     out = torch.cat(out, dim=1)
+
     return out
 
 

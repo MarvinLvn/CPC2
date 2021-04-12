@@ -40,15 +40,13 @@ def ABX(args,
 
     # Output
     scores = {}
-
     # ABX within
     if 'within' in modes:
         print("Computing ABX within speakers...")
         ABXIterator = ABXDataset.get_iterator('within', max_size_group)
         group_confusion = abx_g.get_abx_scores_dtw_on_group(ABXIterator,
                                                             distance_function,
-                                                            ABXIterator.symmetric,
-                                                            nprocess=args.num_processes)
+                                                            ABXIterator.symmetric)
         n_data = group_confusion._values().size(0)
         index_ = torch.sparse.LongTensor(group_confusion._indices(),
                                          torch.ones((n_data),
@@ -75,8 +73,7 @@ def ABX(args,
 
         group_confusion = abx_g.get_abx_scores_dtw_on_group(ABXIterator,
                                                             distance_function,
-                                                            ABXIterator.symmetric,
-                                                            nprocess=args.num_processes)
+                                                            ABXIterator.symmetric)
         n_data = group_confusion._values().size(0)
         index_ = torch.sparse.LongTensor(group_confusion._indices(),
                                          torch.ones((n_data),
@@ -111,7 +108,7 @@ def update_base_parser(parser):
     parser.add_argument('--mode', type=str, default='all',
                         choices=['all', 'within', 'across'],
                         help="Type of ABX score to compute")
-    parser.add_argument("--max_size_group", type=int, default=20,
+    parser.add_argument("--max_size_group", type=int, default=10,
                         help="Max size of a group while computing the"
                              "ABX score")
     parser.add_argument("--max_x_across", type=int, default=5,
@@ -147,13 +144,13 @@ def parse_args(argv):
                                    'will contain exactly max_size_seq frames.')
     parser_checkpoint.add_argument('--file_extension', type=str,
                                    default='.wav',
-                                   help='Extension of ecah audio file in the '
+                                   help='Extension of each audio file in the '
                                    'dataset.')
     parser_checkpoint.add_argument('--get_encoded', action='store_true',
                                    help='If activated, compute the ABX score '
                                    'using the output of the encoder network.')
-    parser_checkpoint.add_argument('-n', '--num_processes', type=int, default=40,
-                                   help='Number of processes to use for group computation')
+    parser_checkpoint.add_argument('--cca_projection', type=str, default=None, required=False,
+                                   help='Path to a pre-trained CCA model (.pkl format).')
 
     parser_db = subparsers.add_parser('from_pre_computed')
     update_base_parser(parser_db)
@@ -177,7 +174,8 @@ def main(argv):
         model = loadModel([args.path_checkpoint])[0]
         model.gAR.keepHidden = True
         # Feature maker
-        feature_maker = FeatureModule(model, args.get_encoded).cuda().eval()
+        feature_maker = FeatureModule(model, args.get_encoded,
+                                      cca_projection=args.cca_projection).cuda().eval()
 
         def feature_function(x): return buildFeature(feature_maker, x,
                                                      seqNorm=args.seq_norm,
@@ -195,7 +193,6 @@ def main(argv):
     distance_mode = 'cosine'
 
     step_feature = 1 / args.feature_size
-    print(step_feature)
 
     # Get the list of sequences
     seq_list, _ = findAllSeqs(args.path_dataset, extension=args.file_extension)
@@ -214,7 +211,7 @@ def main(argv):
 
     out_dir = Path(args.path_checkpoint).parent if args.out is None \
         else Path(args.out)
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(exist_ok=True, parents=True)
 
     path_score = out_dir / 'ABX_scores.json'
     with open(path_score, 'w') as file:
