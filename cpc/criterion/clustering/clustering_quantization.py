@@ -253,7 +253,6 @@ def main(argv):
         torch.save(quant_data, outputFile)
     bar.finish()
     print(f"...done {len(seqNames)} files in {time()-start_time} seconds.")
-    f.close()
 
 if __name__ == "__main__":
     args = sys.argv[1:]

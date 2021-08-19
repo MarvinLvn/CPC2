@@ -96,7 +96,7 @@ if __name__ == "__main__":
     seqNames, speakers = findAllSeqs(args.pathDB,
                                      speaker_level=args.recursionLevel,
                                      extension=args.extension,
-                                     loadCache=True)
+                                     loadCache=False)
 
     if args.seqList is not None:
         seqNames = filterSeqs(args.seqList, seqNames)
