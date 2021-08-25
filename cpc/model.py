@@ -292,9 +292,10 @@ class CPCModel(nn.Module):
 
         # This would make more sense if the encoded features would be between 0 and 1.
         # Should think about normalizing
-        self.mask_emb = nn.Parameter(
-            torch.FloatTensor(encoder.dimEncoded).uniform_()
-        )
+        if mask_prob > 0.0:
+            self.mask_emb = nn.Parameter(
+                torch.FloatTensor(encoder.dimEncoded).uniform_()
+            )
 
     def compute_mask_indices(self,
             shape: Tuple[int, int],

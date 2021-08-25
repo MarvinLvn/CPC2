@@ -18,6 +18,7 @@ import numpy as np
 import torch
 from cpc.cpc_default_config import set_default_cpc_config
 from cpc.data_augmentation import augmentation_factory
+from cpc.distributed_training.distributed_mode import init_distributed_mode
 from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
     PeakNorm
 
@@ -319,6 +320,14 @@ def main(argv):
     if args.speakerEmbedding is not None and not os.path.exists(args.speakerEmbedding):
         raise ValueError("%s can't be found. Are you sure you provided the right location ?" % args.speakerEmbedding)
 
+    batchSize = args.nGPU * args.batchSizeGPU
+
+    if args.distributed:
+        print('Distributed mode, moving to 1 process for data loading')
+        args.n_process_loader = 1
+        init_distributed_mode(args)
+    args.is_local_master = (not args.distributed) or (args.global_rank == 0)
+
     utils.set_seed(args.random_seed)
 
     print(f'CONFIG:\n{json.dumps(vars(args), indent=4, sort_keys=True)}')
@@ -344,6 +353,7 @@ def main(argv):
                          "and specified the right audio extension.")
 
     if args.pathVal is None:
+        import random
         print('No validation data specified!')
         if args.samplingType == "temporalsamespeaker":
             # Shuffle by blocks so that we keep temporality
@@ -406,7 +416,22 @@ def main(argv):
                                       keep_temporality=args.naming_convention.startswith("id_spkr_onset_offset"),
                                       past_equal_future=args.meta_aug
                                       )
-
+    # to be checked
+    if args.distributed:
+        import random
+        def filter_distributed(files):
+            start = len(files) * args.global_rank // args.world_size
+            end = len(files) * (args.global_rank + 1) // args.world_size
+            print(start, end)
+            return files[start:end]
+        print(
+            f'Initial worker files: {len(seqTrain)} train, {len(seqVal)} val')
+        seqTrain = filter_distributed(seqTrain)
+        seqVal = filter_distributed(seqVal)
+        if seqNoise is not None:
+            seqNoise = filter_distributed(seqNoise)
+        print(
+            f'Current worker files: {len(seqTrain)} train, {len(seqVal)} val')
 
     print(f'\nLoading audio data at {args.pathDB}')
     print("Loading the training dataset")
@@ -420,7 +445,7 @@ def main(argv):
                                   augment_future=args.augment_future,
                                   augment_past=args.augment_past,
                                   augmentation=augmentation_factory(args, noiseDataset),
-                                  keep_temporality=args.naming_convention.startswith("id_spkr_onset_offset"),
+                                  keep_temporality=args.samplingType == "temporalsamespeaker",
                                   speaker_embedding=args.speakerEmbedding,
                                   speaker_embedding_step=args.speakerEmbeddingStep,
                                   past_equal_future=args.past_equal_future)
@@ -459,8 +484,6 @@ def main(argv):
         else:
             cpcModel = model.CPCModel(encoderNet, arNet, args.mask_prob, args.mask_length)
 
-
-    batchSize = args.nGPU * args.batchSizeGPU
     cpcModel.supervised = args.supervised
 
     # Training criterion
@@ -497,8 +520,9 @@ def main(argv):
         if not os.path.isdir(args.pathCheckpoint):
             os.mkdir(args.pathCheckpoint)
         args.pathCheckpoint = os.path.join(args.pathCheckpoint, "checkpoint")
-        with open(args.pathCheckpoint + "_args.json", 'w') as file:
-            json.dump(vars(args), file, indent=2)
+        if args.is_local_master:
+            with open(args.pathCheckpoint + "_args.json", 'w') as file:
+                json.dump(vars(args), file, indent=2)
 
     scheduler = None
     if args.schedulerStep > 0:
@@ -521,10 +545,18 @@ def main(argv):
         for i in range(len(logs["epoch"])):
             scheduler.step()
 
-    cpcModel = torch.nn.DataParallel(cpcModel,
-                                     device_ids=range(args.nGPU)).cuda()
-    cpcCriterion = torch.nn.DataParallel(cpcCriterion,
+    print('args.local_rank: ' + str(args.local_rank))
+    if args.distributed:
+        cpcModel = torch.nn.parallel.DistributedDataParallel(cpcModel, device_ids=[
+            args.local_rank], output_device=args.local_rank, broadcast_buffers=True)
+        cpcCriterion = torch.nn.parallel.DistributedDataParallel(cpcCriterion, device_ids=[
+            args.local_rank], output_device=args.local_rank, broadcast_buffers=True)
+    else:
+        cpcModel = torch.nn.DataParallel(cpcModel,
                                          device_ids=range(args.nGPU)).cuda()
+        cpcCriterion = torch.nn.DataParallel(cpcCriterion,
+                                             device_ids=range(args.nGPU)).cuda()
+
 
     run(trainDataset,
         valDataset,
@@ -533,7 +565,7 @@ def main(argv):
         cpcModel,
         cpcCriterion,
         args.nEpoch,
-        args.pathCheckpoint,
+        args.pathCheckpoint if args.is_local_master else None,
         optimizer,
         scheduler,
         logs,
@@ -617,6 +649,14 @@ def parseArgs(argv):
     parser.add_argument('--debug', action='store_true',
                         help="Load only a very small amount of files for "
                         "debugging purposes.")
+
+    group_distrubed = parser.add_argument_group(
+        'Distributed training (FAIR only)')
+    group_distrubed.add_argument('--distributed', action='store_true')
+    group_distrubed.add_argument("--local_rank", type=int, default=-1,
+                                 help="Multi-GPU - Local rank")
+    group_distrubed.add_argument("--master_port", type=int, default=-1,
+                                 help="Master port (for multi-node SLURM jobs)")
 
     args = parser.parse_args(argv)
 
