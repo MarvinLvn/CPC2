@@ -307,6 +307,7 @@ def main(argv):
             fl.loadArgs(args, locArgs,
                         forbiddenAttr={"nGPU", "pathCheckpoint",
                                        "debug", "restart", "world_size",
+                                       "global_rank", "local_rank"
                                        "n_nodes", "node_id", "n_gpu_per_node",
                                        "max_size_loaded", "nEpoch", "save_step"})
             args.load, loadOptimizer = [data], True
