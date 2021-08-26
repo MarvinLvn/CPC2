@@ -116,16 +116,6 @@ def trainStep(dataLoader,
         optimizer.step()
         optimizer.zero_grad()
 
-        # just a test to be deleted
-        del full_data
-        del sequence
-        del label
-        del past
-        del future
-        del combined
-        del c_feature
-        del encoded_data
-
         if allLosses.nelement() > 0:
             if "locLoss_train" not in logs:
                 logs["locLoss_train"] = np.zeros(allLosses.size(1))
@@ -142,7 +132,7 @@ def trainStep(dataLoader,
                 print(f"elapsed: {elapsed:.1f} s")
                 print(
                     f"{1000.0 * elapsed / loggingStep:.1f} ms per batch, {1000.0 * elapsed / n_examples:.1f} ms / example")
-                locLogs = utils.update_logs(logs, loggingStep, lastlogs)
+                locLogs = utils.update_logs(logs, iter, lastlogs)
                 lastlogs = deepcopy(logs)
                 utils.show_logs("Training loss", locLogs)
                 start_time, n_examples = new_time, 0
@@ -193,16 +183,6 @@ def valStep(dataLoader,
             else:
                 # without speaker embedding
                 allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
-
-        # just a test to be deleted
-        del full_data
-        del sequence
-        del label
-        del past
-        del future
-        del combined
-        del c_feature
-        del encoded_data
 
         if "locLoss_val" not in logs:
             logs["locLoss_val"] = np.zeros(allLosses.size(1))
@@ -307,7 +287,7 @@ def main(argv):
             fl.loadArgs(args, locArgs,
                         forbiddenAttr={"nGPU", "pathCheckpoint",
                                        "debug", "restart", "world_size",
-                                       "global_rank", "local_rank", 
+                                       "global_rank", "local_rank",
                                        "n_nodes", "node_id", "n_gpu_per_node",
                                        "max_size_loaded", "nEpoch", "save_step"})
             args.load, loadOptimizer = [data], True
