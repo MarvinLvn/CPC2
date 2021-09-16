@@ -94,6 +94,8 @@ def kMeanGPU(dataLoader, featureMaker, k, n_group=1,
     bar = progressbar.ProgressBar(maxval=MAX_ITER)
     bar.start()
     iter, stored = 0, 0
+    sum_seen = 0
+    print("perIterSize = %.f" % perIterSize)
     if load and start_clusters is None and exists(join(save_dir, "checkpoint_last.pt")):
         iter = state_dict["iteration"]
         lastDiff = state_dict["lastDiff"]
@@ -113,16 +115,16 @@ def kMeanGPU(dataLoader, featureMaker, k, n_group=1,
                 Ck1 += locC.sum(dim=0, keepdim=True)
                 nItemsClusters += locN.sum(dim=0)
                 ### If the training set is too big and we want to redude the number of item per iteration
-                # stored += 1
-                # if stored >= perIterSize:
-                #     bar.update(iter)
-                #     iter += 1
-                #     stored = 0
-                #     if iter >= MAX_ITER:
-                #         break
+                stored += 1
+                sum_seen += data[0].shape[0] * data[0].shape[-1] / 16000
+
+                if stored >= perIterSize:
+                    stored = 0
+                    break
 
             iter += 1
             bar.update(iter)
+            print("I've seen %.2f hours in %d epochs :) More data more data more data!" % (sum_seen / 3600, iter))
 
             nItemsClusters = nItemsClusters.float().view(1, -1, 1) + 1e-8
             Ck1 /= nItemsClusters

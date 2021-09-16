@@ -55,7 +55,7 @@ def parseArgs(argv):
     parser.add_argument('-l', '--DPLambda', type=float, default=11,
                         help='Lambda parameter of DPMeans algo (default: 11).')
     parser.add_argument('--perIterSize', type=int, default=-1,
-                        help='(Depreciated) Number of items per iteration (default: -1).')
+                        help='Number of items per iteration (default: -1).')
     parser.add_argument('--train_mode', action='store_true',
                         help='Activate training CPC module too.')
     parser.add_argument('--dimReduction', type=str, default=None,
