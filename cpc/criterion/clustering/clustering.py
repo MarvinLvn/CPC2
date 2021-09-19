@@ -119,9 +119,14 @@ def kMeanGPU(dataLoader, featureMaker, k, n_group=1,
                 sum_seen += data[0].shape[0] * data[0].shape[-1] / 16000
 
                 if stored >= perIterSize:
-                    stored = 0
                     break
 
+            if stored < perIterSize:
+                # We haven't seen enough batches to save the checkpoint
+                # Let's get data rolling!
+                continue
+
+            stored = 0
             iter += 1
             bar.update(iter)
             print("I've seen %.2f hours in %d epochs :) More data more data more data!" % (sum_seen / 3600, iter))
