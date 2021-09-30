@@ -655,7 +655,7 @@ def parseArgs(argv):
 
     if args.samplingType == "temporalsamespeaker" and \
             ((not args.naming_convention.startswith("id_spkr_onset_offset")) and args.naming_convention != "spkr-id"
-            and args.naming_convention != 'spkr_id_nb'):
+            and args.naming_convention != 'spkr_id_nb' and args.naming_convention != 'no_speaker'):
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
                          "to id_spkr_onset_offset (daylong recordings) or spkr-id (librispeech) or spkr_id_nb (inftrain)"
                          "as we need to sort the files temporally.")

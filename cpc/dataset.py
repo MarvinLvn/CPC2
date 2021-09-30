@@ -960,6 +960,8 @@ def findAllSeqs(dirName,
                         idStr = '-'.join(filename.split('-')[0:2])
                     elif format == "spkr_id_nb":
                         idStr = '_'.join(filename.split('_')[0:-1])
+                    elif format == "no_speaker":
+                        idStr = 'anonymous'
 
                     if idStr not in idsTarget:
                         idsTarget[idStr] = len(idsTarget)
@@ -997,6 +999,9 @@ def findAllSeqs(dirName,
             splitted = filename.split('-')
             return splitted[0:-1], splitted[-1]
 
+        def get_no_speaker(x):
+            return "anonymous", x
+
         if format == "id_spkr_onset_offset":
             sorting_func = get_id_spkr_onset
         elif format == "id_spkr_onset_offset_spkr_onset_offset":
@@ -1005,6 +1010,8 @@ def findAllSeqs(dirName,
             sorting_func = get_spkr_id
         elif format == "spkr_id_nb":
             sorting_func = get_spkr_id2
+        elif format == "no_speaker":
+            sorting_func = get_no_speaker
         outSequencesIds = sorted(outSequencesIds, key=sorting_func)
 
         try:
