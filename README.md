@@ -12,7 +12,7 @@ Moreover, this code also implements all the evaluation metrics used in the paper
 The installation is a tiny bit involved due to the torch-audio dependency.
 
 0/ Clone the repo:
-`git clone git@github.com:facebookresearch/CPC_torch.git && cd CPC_torch`
+`git clone git@github.com:MarvinLvn/CPC_torch.git && cd CPC_torch`
 
 1/ Install libraries which would be required for torch-audio https://github.com/pytorch/audio :
  * MacOS: `brew install sox`
@@ -39,7 +39,7 @@ For more information on the cudatoolkit version to use, please check https://pyt
 We suggest to train the model either on [Librispeech](http://www.openslr.org/12/) or [libri-light](https://github.com/facebookresearch/libri-light).
 
 
-## How to run a session
+## How to train CPC ?
 
 To run a new training session, use:
 
@@ -70,6 +70,26 @@ Please note that each speaker directory can contain an arbitrary number of subdi
 - $TRAINING_SET is a path to a .txt file containing the list of the training sequences (see [here](https://drive.google.com/drive/folders/1BhJ2umKH3whguxMwifaKtSra0TgAbtfb) for example)
 - $VALIDATION_SET is a path to a .txt file containing the list of the validation sequences
 - $EXTENSION is the extension of each audio file
+
+## How to train K-means ?
+
+```bash
+python cpc/criterion/clustering/clustering_script.py \
+    --pathDB path/to/librispeech/train-clean-100/ \
+    --nClusters 50 --MAX_ITER 150 --level_gru 2 \
+    --save --load --batchSizeGPU 500 \
+    checkpoints/CPC_big_6kh/checkpoint_32.pt \
+    checkpoints/clustering_CPC_big_kmeans50/clustering_CPC_big_kmeans50.pt
+```
+
+The two last parameters are the path to the pre-trained CPC checkpoint, and the output path of the K-means .pt file that will be generated.
+
+NOTE: This command was done on a P100 16GB GPU, and the batchSizeGPU should be modified according to nClusters, so as to fit the memory. Here are the recommended numbers:
+
+  nClusters  | 20  | 50  | 100 | 200 | 500 | 2000
+-------------|-----|-----|-----|-----|-----|------
+batchSizeGPU | 500 | 500 | 300 | 200 | 100 |  50
+
 
 ## Custom architectures
 
