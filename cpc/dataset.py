@@ -59,6 +59,7 @@ class AudioBatchData(Dataset):
         self.dbPath = Path(path)
         self.sizeWindow = sizeWindow
         self.seqNames = [(s, self.dbPath / x) for s, x in seqNames]
+
         if speaker_embedding is not None:
             self.speaker_embedding = Path(speaker_embedding)
             self.spkrEmbNames = [self.speaker_embedding / x.replace('.wav', '.npy') for s, x in seqNames]
@@ -1000,7 +1001,9 @@ def findAllSeqs(dirName,
             return splitted[0:-1], splitted[-1]
 
         def get_no_speaker(x):
-            return "anonymous", x
+            filename = x[1]
+            splitted = filename.split('_')
+            return splitted[0:-1], splitted[-1]
 
         if format == "id_spkr_onset_offset":
             sorting_func = get_id_spkr_onset
@@ -1013,6 +1016,9 @@ def findAllSeqs(dirName,
         elif format == "no_speaker":
             sorting_func = get_no_speaker
         outSequencesIds = sorted(outSequencesIds, key=sorting_func)
+
+        if format == "no_speaker":
+            outSequencesIds = [(0,v) for _, v in outSequencesIds]
 
         try:
             torch.save((outSequencesIds, outIds), cache_path)
