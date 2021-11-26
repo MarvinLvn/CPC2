@@ -17,14 +17,12 @@ The installation is a tiny bit involved due to the torch-audio dependency.
 1/ Install libraries which would be required for torch-audio https://github.com/pytorch/audio :
  * MacOS: `brew install sox`
  * Linux: `sudo apt-get install sox libsox-dev libsox-fmt-all`
+ * Linux cluster using `module` (like Jean Zay) : `module load sox`
 
 2/ `conda env create -f environment.yml && conda activate cpc2`
 
 3/ Run setup.py
 `python setup.py develop`
-
-4/ Install wavaugment
-`git clone git@github.com:facebookresearch/WavAugment.git && cd WavAugment && python setup.py develop`
 
 You can test your installation with:
 `nosetests -d`
