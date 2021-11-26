@@ -22,7 +22,7 @@ from cpc.distributed_training.distributed_mode import init_distributed_mode
 from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
     PeakNorm
 
-#torch.multiprocessing.set_sharing_strategy('file_system')
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 def getCriterion(args, downsampling, nSpeakers, nPhones):
     dimFeatures = args.hiddenGar if not args.onEncoder else args.hiddenEncoder
