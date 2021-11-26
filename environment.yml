@@ -21,3 +21,4 @@ dependencies:
     - progressbar2
     - matplotlib
     - torchaudio==0.6.0
+    - git+ssh://git@github.com/fairinternal/speech_augment.git@9f0564344740120f5b3687c24d5e009674d51aac#egg=augment
