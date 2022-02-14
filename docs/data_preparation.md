@@ -1,5 +1,14 @@
 ### Data preparation
 
+#### Audio samples
+
+Audiobooks
+
+Long-forms
+
+Simulated long-forms
+
+
 #### Format description
 
 The training set should be arranged as follows:
@@ -34,4 +43,6 @@ WIP
 #### Simulated long-form recordings
 
 WIP
+
+### Utility scripts
 
