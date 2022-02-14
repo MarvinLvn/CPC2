@@ -2,29 +2,26 @@
 
 #### Format description
 
-Where:
-- $PATH_AUDIO_FILES is the directory containing the audio files. The files should be arranged as below:
+The training set should be arranged as follows:
+
 ```
 PATH_AUDIO_FILES  
 │
-└───speaker1
+└───class1
 │   └───...
 │         │   seq_11.{$EXTENSION}
 │         │   seq_12.{$EXTENSION}
 │         │   ...
 │   
-└───speaker2
+└───class2
     └───...
           │   seq_21.{$EXTENSION}
           │   seq_22.{$EXTENSION}
 ```
 
-Please note that each speaker directory can contain an arbitrary number of subdirectories: the speaker label will always be retrieved from the top one.
-
-- $PATH_CHECKPOINT_DIR in the directory where the checkpoints will be saved
-- $TRAINING_SET is a path to a .txt file containing the list of the training sequences (see [here](https://drive.google.com/drive/folders/1BhJ2umKH3whguxMwifaKtSra0TgAbtfb) for example)
-- $VALIDATION_SET is a path to a .txt file containing the list of the validation sequences
-- $EXTENSION is the extension of each audio file
+The `class_i` information can then be used to sample sequences when training the model.
+For instance, if `class_i` corresponds to speakers, then batch sequences can be drawn within- or across-speakers.
+Please note that each class directory can contain an arbitrary number of subdirectories: the class label will always be retrieved from the top one.
 
 #### Audiobooks
 
