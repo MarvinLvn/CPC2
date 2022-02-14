@@ -9,7 +9,7 @@ Adapted and modified from the publication [Unsupervised Pretraining Transfers we
 ### How to use ?
 
 1) [Installation](./docs/installation.md)
-2) [Evaluation](./docs/evaluations.md)
+2) [Data preparation](./docs/data_preparation.md)
 3) [Training and Evaluation](./docs/training_and_eval.md)
 
 ### References
