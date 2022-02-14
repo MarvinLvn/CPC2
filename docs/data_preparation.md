@@ -26,6 +26,9 @@ Please note that each speaker directory can contain an arbitrary number of subdi
 - $VALIDATION_SET is a path to a .txt file containing the list of the validation sequences
 - $EXTENSION is the extension of each audio file
 
+#### Audiobooks
+
+WIP
 
 #### Long-form recordings
 
@@ -35,6 +38,3 @@ WIP
 
 WIP
 
-#### Audiobooks
-
-WIP
