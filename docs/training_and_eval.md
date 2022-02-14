@@ -1,12 +1,28 @@
-# How to train a CPC model?
+### How to train a CPC model?
 
-To train a CPC model, use:
-
+1) To train a domain-specific learner (data augmentation + same pseudo-speaker sampling):
+ 
 ```bash
-python cpc/train.py --pathDB $PATH_AUDIO_FILES --pathCheckpoint $PATH_CHECKPOINT_DIR --pathTrain $TRAINING_SET --pathVal $VAL_SET --file_extension $EXTENSION
+python cpc/train.py --pathDB $PATH_DS_DATA --pathCheckpoint /where/to/store/the/model  --file_extension .wav \
+  --n-levels-gru=2 --multihead-rnn --scheduler-ramp=10 --save-step=5 --n-process-loader=1 \
+  --max-size-loaded=4000000000 --no-artefacts --nb-epochs=200 --augment-past --augment-type=pitch,artificial_reverb \
+  --sampling-type=temporalsamespeaker --naming-convention=id_spkr_onset_offset --no-artefacts
 ```
 
-# How to compute the ABX error rate?
+where `$PATH_DS_DATA` contains speech segments organized as in the [data preparation](../docs/data_preparation.md) section.
+
+2) To train a domain-general learner (on the whole audio stream):
+
+```bash
+python cpc/train.py --pathDB $PATH_DG_DATA --pathCheckpoint /where/to/store/the/model --file_extension .wav \
+  --n-levels-gru=2 --multihead-rnn --scheduler-ramp=10 --save-step=5 --n-process-loader=1 \
+  --max-size-loaded=4000000000 --no-artefacts --nb-epochs=200 \
+  --sampling-type=temporalsamespeaker --naming-convention=no_speaker --no-artefacts
+```
+
+where `$PATH_DG_DATA` contains audio segments (speech and non-speech) organized as in the [data preparation](../docs/data_preparation.md) section.
+
+### How to compute the ABX error rate?
 
 You can compute the ABX error rate on the [Zerospeech2017 dataset](https://zerospeech.com/2017/index.html). 
 To begin, download the dataset [here](https://download.zerospeech.com/). Then run the ABX evaluation on a given checkpoint with:
@@ -22,7 +38,31 @@ Where:
 - --seq_norm normalize each batch of features across the time channel before computing ABX
 - --strict forces each batch of features to contain exactly the same number of frames.
 
-# Bonus: How to train a K-means model from CPC representations?
+### Bonus: Multi-machines training using slurm
+
+You can train CPC on 2 machines of 4 GPUs each with the following bash script (let's call this script `train_CPC_multi_machines.sh`:
+
+```bash
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=4       
+#SBATCH --cpus-per-task=10
+#SBATCH --gres=gpu:4
+#SBATCH --time=20:00:00
+
+export MASTER=`hostname`
+export MASTER_PORT=13369
+
+srun python CPC2/cpc/train.py --distributed --master_port $MASTER_PORT --pathDB /path/to/training/set --pathCheckpoint /where/to/store/the/model ...
+```
+
+Then the following line will submit the job:
+
+```bash
+sbatch -o my_first_model.txt train_CPC_multi_machines.txt
+```
+
+### Bonus: How to train a K-means model from CPC representations?
 
 ```bash
 python cpc/criterion/clustering/clustering_script.py \
