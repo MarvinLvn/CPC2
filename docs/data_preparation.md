@@ -9,14 +9,14 @@ PATH_AUDIO_FILES
 │
 └───class1
 │   └───...
-│         │   seq_11.{$EXTENSION}
-│         │   seq_12.{$EXTENSION}
+│         │   seq_11.wav
+│         │   seq_12.wav
 │         │   ...
 │   
 └───class2
     └───...
-          │   seq_21.{$EXTENSION}
-          │   seq_22.{$EXTENSION}
+          │   seq_21.wav
+          │   seq_22.wav
 ```
 
 The `class_i` information can then be used to sample sequences when training the model.
