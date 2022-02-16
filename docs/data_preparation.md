@@ -8,7 +8,6 @@ Long-forms
 
 Simulated long-forms
 
-
 #### Format description
 
 The training set should be arranged as follows:
@@ -42,7 +41,7 @@ WIP
 
 #### Simulated long-form recordings
 
-WIP
+Once audiobooks have been downloaded, and their speech segments have been extracted, you can ...
 
 ### Utility scripts
 

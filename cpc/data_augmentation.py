@@ -5,7 +5,7 @@ import torchaudio
 import numpy as np
 from copy import deepcopy
 from torch.utils.data.dataloader import _SingleProcessDataLoaderIter
-import augment.sox_effects as sox_effects
+import augment.effects as sox_effects
 from torch_audiomentations import Compose, AddBackgroundNoise, ApplyImpulseResponse
 from cpc.dataset import findAllSeqs
 import os
