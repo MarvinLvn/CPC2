@@ -654,13 +654,14 @@ def parseArgs(argv):
                          "the utterances might break the temporality.")
 
     if args.samplingType == "temporalsamespeaker" and \
-            ((not args.naming_convention.startswith("id_spkr_onset_offset")) and args.naming_convention != "spkr-id"
-            and args.naming_convention != 'spkr_id_nb' and args.naming_convention != 'no_speaker'):
+            args.naming_convention not in ['id_spkr_onset_offset', 'id_spkr_onset_offset_spkr_onset_offset', 'spkr-id',
+                                           'spkr_id_nb', 'no_speaker', 'full_seedlings']:
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
                          "to id_spkr_onset_offset (daylong recordings) or spkr-id (librispeech) or spkr_id_nb (inftrain)"
                          "as we need to sort the files temporally.")
-    if args.samplingType == "temporalsamespeaker":
-        args.ignore_cache = True
+
+    #if args.samplingType == "temporalsamespeaker":
+    #    args.ignore_cache = True
 
     if (args.speakerEmbedding is not None) and (not args.concatenate_spkr_emb) and (args.n_choose_amongst is None):
         raise ValueError("You want to load speaker embeddings but neither args.concatenate_spkr_emb or "

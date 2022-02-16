@@ -953,6 +953,9 @@ def findAllSeqs(dirName,
                 full_path = os.path.join(root[prefixSize:], filename)
                 outSequences.append((speaker, full_path))
                 if format is not None:
+                    # Really need to factor that with a single parameter that points to
+                    # a file containing the sorted audios...otherwise it will very
+                    # likely cause bugs ...
                     if format == "id_spkr_onset_offset":
                         idStr = '_'.join(filename.split('_')[0:-2])
                     elif format == "id_spkr_onset_offset_spkr_onset_offset":
@@ -961,8 +964,13 @@ def findAllSeqs(dirName,
                         idStr = '-'.join(filename.split('-')[0:2])
                     elif format == "spkr_id_nb":
                         idStr = '_'.join(filename.split('_')[0:-1])
+                    elif format == "full_seedlings":
+                        splitted = filename.split('_')
+                        idStr = '_'.join(splitted[0:-2] + [splitted[-1]])
                     elif format == "no_speaker":
                         idStr = 'anonymous'
+                    else:
+                        raise ValueError("%f format unknown" % format)
 
                     if idStr not in idsTarget:
                         idsTarget[idStr] = len(idsTarget)
@@ -992,13 +1000,19 @@ def findAllSeqs(dirName,
             # Returns (spkr, id) tuple
             filename = x[1]
             splitted = filename.split('-')
-            return splitted[0], splitted[1]
+            return splitted[0], int(splitted[1])
 
         def get_spkr_id2(x):
             # Returns (spkr, id) tuple
             filename = x[1]
-            splitted = filename.split('-')
-            return splitted[0:-1], splitted[-1]
+            splitted = filename.split('_')
+            return splitted[0:-1], int(splitted[-1])
+
+        def get_spkr_id_full_seedlings(x):
+            # Returns (spkr, id) tuple
+            filename = x[1]
+            splitted = filename.split('_')
+            return splitted[0:-2] + [splitted[-1]], int(splitted[-2])
 
         def get_no_speaker(x):
             filename = x[1]
@@ -1013,27 +1027,23 @@ def findAllSeqs(dirName,
             sorting_func = get_spkr_id
         elif format == "spkr_id_nb":
             sorting_func = get_spkr_id2
+        elif format == "full_seedlings":
+            sorting_func = get_spkr_id_full_seedlings
         elif format == "no_speaker":
             sorting_func = get_no_speaker
+        else:
+            raise ValueError("can't find sorting func from %s" % format)
         outSequencesIds = sorted(outSequencesIds, key=sorting_func)
-
         if format == "no_speaker":
             outSequencesIds = [(0,v) for _, v in outSequencesIds]
-
-        try:
-            torch.save((outSequencesIds, outIds), cache_path)
-            print(f'Saved cache file at {cache_path}')
-        except OSError as err:
-            print(f'Ran in an error while saving {cache_path}: {err}')
-        return outSequencesIds, outIds
-    # For any other type of sampling
-    else:
-        try:
-            torch.save((outSequences, outSpeakers), cache_path)
-            print(f'Saved cache file at {cache_path}')
-        except OSError as err:
-            print(f'Ran in an error while saving {cache_path}: {err}')
-        return outSequences, outSpeakers
+        outSequences = outSequencesIds
+        outSpeakers = outIds
+    try:
+        torch.save((outSequences, outSpeakers), cache_path)
+        print(f'Saved cache file at {cache_path}')
+    except OSError as err:
+        print(f'Ran in an error while saving {cache_path}: {err}')
+    return outSequences, outSpeakers
 
 
 def parseSeqLabels(pathLabels):
