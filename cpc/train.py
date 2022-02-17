@@ -39,12 +39,9 @@ def getCriterion(args, downsampling, nSpeakers, nPhones):
                                                        rnnMode=args.rnnMode,
                                                        dropout=args.dropout,
                                                        nSpeakers=nSpeakers,
-                                                       speakerEmbedding=args.speakerEmbedding,
                                                        sizeInputSeq=sizeInputSeq,
                                                        multihead_rnn=args.multihead_rnn,
                                                        transformer_pruning=args.transformer_pruning,
-                                                       size_speaker_emb=args.size_speaker_emb,
-                                                       dout_speaker_emb=args.dout_speaker_emb,
                                                        n_skipped=args.n_skipped
                                                        )
     elif args.pathPhone is not None:
@@ -86,7 +83,7 @@ def trainStep(dataLoader,
     iter = 0
 
     for step, full_data in enumerate(dataLoader):
-        sequence, label, *spkr_emb = full_data
+        sequence, label = full_data
         sequence = sequence.cuda(non_blocking=True)
         label = label.cuda(non_blocking=True)
 
@@ -101,13 +98,8 @@ def trainStep(dataLoader,
         encoded_data = encoded_data[b:, :, :]
         label = label[:b]
 
-        if len(spkr_emb) != 0:
-            # with speaker embedding
-            spkr_emb = spkr_emb[0].cuda(non_blocking=True)
-            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
-        else:
-            # without speaker embedding
-            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
+
+        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
 
         totLoss = allLosses.sum()
         totLoss.backward()
@@ -210,9 +202,7 @@ def run(trainDataset,
         scheduler,
         logs,
         no_artefacts,
-        n_choose_amongst,
-        batchSizePerGPU,
-        minibatch_wise):
+        batchSizePerGPU):
 
     print(f"Running {nEpoch} epochs")
     startEpoch = len(logs["epoch"])
@@ -228,9 +218,7 @@ def run(trainDataset,
         trainLoader = trainDataset.getDataLoader(batchSize, samplingMode,
                                                  True, numWorkers=0,
                                                  remove_artefacts=no_artefacts,
-                                                 n_choose_amongst=n_choose_amongst,
-                                                 batch_size_per_gpu=batchSizePerGPU,
-                                                 minibatch_wise=minibatch_wise)
+                                                 batch_size_per_gpu=batchSizePerGPU)
 
         valLoader = valDataset.getDataLoader(batchSize, 'sequential', False,
                                              numWorkers=0)
@@ -297,9 +285,6 @@ def main(argv):
 
     if args.nGPU == 0:
         args.nGPU = 1
-
-    if args.speakerEmbedding is not None and not os.path.exists(args.speakerEmbedding):
-        raise ValueError("%s can't be found. Are you sure you provided the right location ?" % args.speakerEmbedding)
 
     batchSize = args.nGPU * args.batchSizeGPU
 
@@ -427,8 +412,6 @@ def main(argv):
                                   augment_past=args.augment_past,
                                   augmentation=augmentation_factory(args, noiseDataset),
                                   keep_temporality=args.samplingType == "temporalsamespeaker",
-                                  speaker_embedding=args.speakerEmbedding,
-                                  speaker_embedding_step=args.speakerEmbeddingStep,
                                   past_equal_future=args.past_equal_future)
 
     print("Training dataset loaded\n")
@@ -440,9 +423,7 @@ def main(argv):
                                 seqVal,
                                 phoneLabels,
                                 len(speakers),
-                                nProcessLoader=args.n_process_loader,
-                                speaker_embedding=args.speakerEmbedding,
-                                speaker_embedding_step=args.speakerEmbeddingStep)
+                                nProcessLoader=args.n_process_loader)
         print("Validation dataset loaded")
         print("")
     else:
@@ -551,9 +532,7 @@ def main(argv):
         scheduler,
         logs,
         args.no_artefacts,
-        args.n_choose_amongst,
-        args.batchSizeGPU,
-        args.minibatch_wise)
+        args.batchSizeGPU)
 
 
 def parseArgs(argv):
@@ -663,14 +642,6 @@ def parseArgs(argv):
     #if args.samplingType == "temporalsamespeaker":
     #    args.ignore_cache = True
 
-    if (args.speakerEmbedding is not None) and (not args.concatenate_spkr_emb) and (args.n_choose_amongst is None):
-        raise ValueError("You want to load speaker embeddings but neither args.concatenate_spkr_emb or "
-                         "args.n_choose_amongst has been set. The speaker embeddings will be of no use."
-                         "Please deactivate this parameter.")
-
-    if args.speakerEmbedding is None and (args.concatenate_spkr_emb or (args.n_choose_amongst is not None)):
-        raise ValueError("You have activated args.concatenate_spkr_emb or args.n_choose_amongst but "
-                         "haven't specified args.speakerEmbedding")
 
     if not args.meta_aug and (args.meta_aug_type is not None or args.meta_aug_type == "none"):
         raise ValueError("You specified parameters --meta_aug_type without having activated --meta_aug flag.")

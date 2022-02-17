@@ -119,20 +119,8 @@ def set_default_cpc_config(parser):
     group.add_argument('--mask_length', type=int, default=10,
                                help="Number of frames a mask will cover "
                                     "(only supported for CPC models for now).")
-    group.add_argument('--n_choose_amongst', type=int, default=None,
-                               help="Number of sequences that will be first extracted, "
-                                    "and whose cosine distance on their speaker embeddings will be computed."
-                                    "Then the closest sequences will be chosen to build the batch."
-                                    "Should be greater than the batch size.")
-    group.add_argument('--concatenate_spkr_emb', action='store_true',
-                               help="If True, will concatenate the speaker embeddings to the input"
-                                    "of the prediction network")
     group.add_argument('--n_skipped', type=int, default=0,
                                help="Number of time steps that will be skipped in the prediction task.")
-    group.add_argument('--minibatch_wise', action='store_true', default=False,
-                               help="If, true, will sample sequences minibatch wise"
-                                    "(only works if temporal sampling is activated) : 8 consecutive sequences"
-                                    "8 per minibatch instead of 64 per batch, etc.")
     group_augment = parser.add_argument_group('Data augmentation configuration',
                                       description="The arguments defining the "
                                       "data augmentation.")

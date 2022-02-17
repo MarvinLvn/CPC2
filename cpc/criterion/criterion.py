@@ -190,23 +190,6 @@ class NoneCriterion(BaseCriterion):
         return torch.zeros(1, 1, device=cFeature.device), \
             torch.zeros(1, 1, device=cFeature.device)
 
-
-class SpeakerEmbeddingConcatenator(nn.Module):
-
-    def __init__(self,
-                 din=512,
-                 dout=0):
-        super(SpeakerEmbeddingConcatenator, self).__init__()
-        self.dout = dout
-        if dout > 0:
-            self.linear_layer = nn.Linear(din, dout, bias=True)
-
-    def forward(self, x, speaker_embedding):
-        if self.dout > 0:
-            speaker_embedding = self.linear_layer(speaker_embedding)
-        return torch.cat([x, speaker_embedding], dim=2)
-
-
 class CPCUnsupersivedCriterion(BaseCriterion):
 
     def __init__(self,
@@ -217,24 +200,13 @@ class CPCUnsupersivedCriterion(BaseCriterion):
                  mode=None,
                  rnnMode=False,
                  dropout=False,
-                 speakerEmbedding=None,
                  nSpeakers=0,
                  sizeInputSeq=116,
                  multihead_rnn=False,
                  transformer_pruning=0,
-                 size_speaker_emb=512,
-                 dout_speaker_emb=0,
                  n_skipped=0):
 
         super(CPCUnsupersivedCriterion, self).__init__()
-
-        if speakerEmbedding is not None:
-            print(
-                f"Concatenating speaker embeddings from {speakerEmbedding}")
-            self.speaker_emb_concatenator = SpeakerEmbeddingConcatenator(size_speaker_emb, dout_speaker_emb)
-            dimOutputAR += size_speaker_emb if dout_speaker_emb == 0 else dout_speaker_emb
-        else:
-            self.speaker_emb_concatenator = None
 
         if multihead_rnn:
             print("Activating multi-head rnn")
@@ -315,18 +287,12 @@ class CPCUnsupersivedCriterion(BaseCriterion):
         if self.mode == "reverse":
             encodedData = torch.flip(encodedData, [1])
             cFeature = torch.flip(cFeature, [1])
-            speaker_embedding = torch.flip(speaker_embedding, [1])
 
         batchSize, seqSize, dimAR = cFeature.size()
         windowSize = seqSize - self.nPredicts
         cFeature = cFeature[:, :windowSize]
 
         sampledData, labelLoss = self.sampleClean(encodedData, windowSize)
-
-        if self.speaker_emb_concatenator is not None:
-            speaker_embedding = speaker_embedding[:, :windowSize]
-            # Concatenate speaker embeddings to context-dependent representations
-            cFeature = self.speaker_emb_concatenator(cFeature, speaker_embedding)
 
         return self.wPrediction(cFeature, sampledData), labelLoss
 
@@ -355,11 +321,11 @@ class CPCUnsupersivedCriterion(BaseCriterion):
 
         return self.wPrediction(cFeature, out)
 
-    def forward(self, cFeature, encodedData, label, speaker_embedding=None):
+    def forward(self, cFeature, encodedData, label):
 
         batchSize, seqSize, _ = cFeature.size()
         windowSize = seqSize - self.nPredicts
-        predictions, labelLoss = self.getPrediction(cFeature, encodedData, label, speaker_embedding)
+        predictions, labelLoss = self.getPrediction(cFeature, encodedData, label)
 
         outLosses = [0 for x in range(self.nPredicts)]
         outAcc = [0 for x in range(self.nPredicts)]
