@@ -107,7 +107,7 @@ def set_default_cpc_config(parser):
     group.add_argument('--adapt_span_loss', type=float, default=2e-6)
     group.add_argument('--transformer_pruning', type=int, default=0)
     group.add_argument('--naming_convention', type=str, default=None,
-                               choices=[None, 'full_seedlings', 'no_speaker', 'id_spkr_onset_offset', 'spkr-id', 'id_spkr_onset_offset_spkr_onset_offset', 'spkr_id_nb'])
+                               choices=[None, 'full_seedlings', 'no_speaker', 'id_spkr_onset_offset', 'spkr-id', 'spkr-id-nb', 'id_spkr_onset_offset_spkr_onset_offset', 'spkr_id_nb'])
     group.add_argument('--no_artefacts', action='store_true',
                                help="Avoid creating artefacts when building batches. "
                                     "If this option is activated, it will check for each sequence that the latter "
@@ -121,6 +121,8 @@ def set_default_cpc_config(parser):
                                     "(only supported for CPC models for now).")
     group.add_argument('--n_skipped', type=int, default=0,
                                help="Number of time steps that will be skipped in the prediction task.")
+    group.add_argument('--no_speaker', action='store_true',
+                       help="Will collapse every speakers into one speaker if activated")
     group_augment = parser.add_argument_group('Data augmentation configuration',
                                       description="The arguments defining the "
                                       "data augmentation.")

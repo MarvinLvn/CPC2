@@ -674,6 +674,7 @@ def extractLength(couple):
 
 
 def findAllSeqs(dirName,
+                no_speaker=False,
                 extension='.flac',
                 loadCache=False,
                 speaker_level=1,
@@ -759,14 +760,17 @@ def findAllSeqs(dirName,
                         idStr = '-'.join(filename.split('-')[0:2])
                     elif format == "spkr_id_nb":
                         idStr = '_'.join(filename.split('_')[0:-1])
+                    elif format == "spkr-id-nb":
+                        idStr = '-'.join(filename.split('-')[0:-1])
                     elif format == "full_seedlings":
                         splitted = filename.split('_')
                         idStr = '_'.join(splitted[0:-2] + [splitted[-1]])
-                    elif format == "no_speaker":
-                        idStr = 'anonymous'
                     else:
-                        raise ValueError("%f format unknown" % format)
+                        if format != "no_speaker":
+                            raise ValueError("%f format unknown" % format)
 
+                    if format == "no_speaker" or no_speaker:
+                        idStr = 'anonymous'
                     if idStr not in idsTarget:
                         idsTarget[idStr] = len(idsTarget)
                         outIds.append(idStr)
@@ -799,8 +803,14 @@ def findAllSeqs(dirName,
 
         def get_spkr_id2(x):
             # Returns (spkr, id) tuple
-            filename = x[1]
+            filename = x[1].replace(extension, '')
             splitted = filename.split('_')
+            return splitted[0:-1], int(splitted[-1])
+
+        def get_spkr_id3(x):
+            # Returns (spkr, id) tuple
+            filename = x[1].replace(extension, '')
+            splitted = filename.split('-')
             return splitted[0:-1], int(splitted[-1])
 
         def get_spkr_id_full_seedlings(x):
@@ -810,9 +820,9 @@ def findAllSeqs(dirName,
             return splitted[0:-2] + [splitted[-1]], int(splitted[-2])
 
         def get_no_speaker(x):
-            filename = x[1]
+            filename = x[1].replace(extension, '')
             splitted = filename.split('_')
-            return splitted[0:-1], splitted[-1]
+            return splitted[0:-1], int(splitted[-1])
 
         if format == "id_spkr_onset_offset":
             sorting_func = get_id_spkr_onset
@@ -822,6 +832,8 @@ def findAllSeqs(dirName,
             sorting_func = get_spkr_id
         elif format == "spkr_id_nb":
             sorting_func = get_spkr_id2
+        elif format == "spkr-id-nb":
+            sorting_func = get_spkr_id3
         elif format == "full_seedlings":
             sorting_func = get_spkr_id_full_seedlings
         elif format == "no_speaker":
@@ -829,7 +841,7 @@ def findAllSeqs(dirName,
         else:
             raise ValueError("can't find sorting func from %s" % format)
         outSequencesIds = sorted(outSequencesIds, key=sorting_func)
-        if format == "no_speaker":
+        if format == "no_speaker" or no_speaker:
             outSequencesIds = [(0,v) for _, v in outSequencesIds]
         outSequences = outSequencesIds
         outSpeakers = outIds
