@@ -8,11 +8,12 @@ import random
 import time
 from copy import deepcopy
 from pathlib import Path
-
+import csv
 import numpy as np
 import torch
 import torch.nn as nn
 import torchaudio
+import functools
 
 import tqdm
 from torch.multiprocessing import Pool
@@ -34,7 +35,10 @@ class AudioBatchData(Dataset):
                  augment_future=False,
                  augmentation=None,
                  keep_temporality=True,
-                 past_equal_future=False):
+                 past_equal_future=False,
+                 signal_quality_path=None,
+                 signal_quality_step=1600,
+                 signal_quality_mode=None):
         """
         Args:
             - path (string): path to the training dataset
@@ -52,19 +56,43 @@ class AudioBatchData(Dataset):
            - MAX_SIZE_LOADED (int): target maximal size of the floating array
                                     containing all loaded data.
         """
+        # Data parameters
         self.MAX_SIZE_LOADED = MAX_SIZE_LOADED
         self.nProcessLoader = nProcessLoader
         self.dbPath = Path(path)
         self.sizeWindow = sizeWindow
         self.seqNames = [(s, self.dbPath / x) for s, x in seqNames]
-
         self.reload_pool = Pool(nProcessLoader)
         self.transform = transform
         self.keep_temporality = keep_temporality
 
+        # Signal quality parameters
+        self.signal_quality_path = Path(signal_quality_path) if signal_quality_path is not None else None
+        self.signal_quality_step = signal_quality_step
+            # Number of signal quality estimations in one input sequence of 1.28 sec
+        self.signal_quality_size = self.sizeWindow // self.signal_quality_step
+        self.signal_quality_mode = signal_quality_mode
+
+        if self.signal_quality_path is not None:
+            self.init_min_max_signal_quality()
+
+
+        # Data augmentation parameters
+        self.augment_past = augment_past
+        self.augment_future = augment_future
+        self.augmentation = augmentation
+        self.past_equal_future = past_equal_future
+        if self.past_equal_future and not self.augment_past:
+            raise ValueError("Can only apply the same transformation on past and future sequences,"
+                             "when past sequence is augmented. Here --augment_past = False")
+
+        # Initialize data loading
+        self.doubleLabels = False
+
         self.prepare()
         self.speakers = list(range(nSpeakers))
         self.data = []
+        self.data_quality = []
 
         self.phoneSize = 0 if phoneLabelsDict is None else \
             phoneLabelsDict["step"]
@@ -74,16 +102,23 @@ class AudioBatchData(Dataset):
         self.phoneLabelsDict = deepcopy(phoneLabelsDict)
         self.loadNextPack(first=True)
         self.loadNextPack()
-        self.doubleLabels = False
 
-        self.augment_past = augment_past
-        self.augment_future = augment_future
-        self.augmentation = augmentation
-        self.past_equal_future = past_equal_future
+    def init_min_max_signal_quality(self):
+        file_path = self.signal_quality_path / 'min_max.csv'
+        if not file_path.is_file():
+            raise FileNotFoundError('Can not find file containing min/max values of snr and c50 under: %s' % (
+                    self.signal_quality_path / 'min_max.csv'))
+        with open(file_path, 'r') as fin:
+            reader = csv.reader(fin)
+            keys = next(reader)
+            values = next(reader)
+            data = {k: v for k, v in zip(keys, values)}
+            try:
+                self.min_snr, self.max_snr = float(data['min_snr']), float(data['max_snr'])
+                self.min_c50, self.max_c50 = float(data['min_c50']), float(data['max_c50'])
+            except:
+                raise ValueError("min_max.csv should contain the following keys: min_snr, max_snr, min_c50, max_c50.")
 
-        if self.past_equal_future and not self.augment_past:
-            raise ValueError("Can only apply the same transformation on past and future sequences,"
-                             "when past sequence is augmented. Here --augment_past = False")
 
     def resetPhoneLabels(self, newPhoneLabels, step):
         self.phoneSize = step
@@ -127,6 +162,10 @@ class AudioBatchData(Dataset):
             # We shuffle sequences in random order
             random.shuffle(self.seqNames)
 
+        # Let's not forget to keep seqNames and signal_quality_names aligned
+        if self.signal_quality_path is not None:
+            self.signal_quality_names = [self.signal_quality_path / os.path.relpath(x, self.dbPath).replace('.wav', '.pt')
+                                         for s, x in self.seqNames]
         start_time = time.time()
 
         print("Checking length...")
@@ -166,12 +205,19 @@ class AudioBatchData(Dataset):
             self.nextData = self.r.get()
             self.parseNextDataBlock()
             del self.nextData
+
         self.nextPack = (self.currentPack + 1) % len(self.packageIndex)
         seqStart, seqEnd = self.packageIndex[self.nextPack]
 
         if self.nextPack == 0 and len(self.packageIndex) > 1:
             self.prepare()
-        self.r = self.reload_pool.map_async(loadFile, self.seqNames[seqStart:seqEnd])
+
+        if self.signal_quality_path is not None:
+            partial_loadFile = functools.partial(loadFile, signal_quality_step=self.signal_quality_step)
+            self.r = self.reload_pool.map_async(partial_loadFile, zip(self.seqNames[seqStart:seqEnd],
+                                                                      self.signal_quality_names[seqStart:seqEnd]))
+        else:
+            self.r = self.reload_pool.map_async(loadFile, self.seqNames[seqStart:seqEnd])
 
     def parseNextDataBlock(self):
         # Labels
@@ -184,8 +230,9 @@ class AudioBatchData(Dataset):
         # To accelerate the process a bit
         self.nextData.sort(key=lambda x: (x[0], x[1]))
         tmpData = []
+        tmpDataQuality = []
 
-        for speaker, seqName, seq, *spkr_emb in self.nextData:
+        for speaker, seqName, seq, *signal_quality in self.nextData:
             while self.speakers[indexSpeaker] < speaker:
                 indexSpeaker += 1
                 self.speakerLabel.append(speakerSize)
@@ -198,16 +245,40 @@ class AudioBatchData(Dataset):
                 seq = seq[:newSize]
             sizeSeq = seq.size(0)
             tmpData.append(seq)
+            if len(signal_quality) != 0:
+                tmpDataQuality.append(signal_quality[0])
             self.seqLabel.append(self.seqLabel[-1] + sizeSeq)
             speakerSize += sizeSeq
             del seq
+            del signal_quality
 
         self.speakerLabel.append(speakerSize)
         self.data = torch.cat(tmpData, dim=0)
+        if len(tmpDataQuality) != 0:
+            self.data_quality = torch.cat(tmpDataQuality, dim=0)
+            # Normalize scores
+            self.data_quality[:, 0] = (self.data_quality[:, 0] - self.min_snr) / (self.max_snr - self.min_snr)
+            self.data_quality[:, 1] = (self.data_quality[:, 1] - self.min_c50) / (self.max_c50 - self.min_c50)
+
+            # Add average of snr and C50 as a column
+            self.data_quality = torch.cat((self.data_quality,
+                                           torch.mean(self.data_quality, dim=1).view(-1, 1)), dim=1)
 
     def getPhonem(self, idx):
         idPhone = idx // self.phoneSize
         return self.phoneLabels[idPhone:(idPhone + self.phoneStep)]
+
+    def getSignalQuality(self, idx):
+        idxQuality = idx // self.signal_quality_step
+        estimated_signal_quality = self.data_quality[idxQuality:(idxQuality + self.signal_quality_size)]
+        if self.signal_quality_mode == 'snr':
+            return estimated_signal_quality[:, 0]
+        elif self.signal_quality_mode == 'c50':
+            return estimated_signal_quality[:, 1]
+        elif self.signal_quality_mode == 'snr_c50':
+            return estimated_signal_quality[:, 2]
+        else:
+            raise ValueError("--signal_quality_mode should be in ['snr', 'c50', 'snr_c50'].")
 
     def getSpeakerLabel(self, idx):
         idSpeaker = next(x[0] for x in enumerate(
@@ -221,8 +292,8 @@ class AudioBatchData(Dataset):
         if idx < 0 or idx >= len(self.data) - self.sizeWindow - 1:
             print(idx)
             print("upper bound %d" % (len(self.data) - self.sizeWindow - 1))
-        outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
 
+        outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
         label = torch.tensor(self.getSpeakerLabel(idx), dtype=torch.long)
         if self.phoneSize > 0:
             label_phone = torch.tensor(self.getPhonem(idx), dtype=torch.long)
@@ -251,9 +322,12 @@ class AudioBatchData(Dataset):
 
         res = outData, label
         if self.doubleLabels:
-            return outData, label, label_phone
+            res = res + (label_phone, )
 
-        return outData, label
+        if self.signal_quality_path:
+            outDataSignalQuality = self.getSignalQuality(idx)
+            res = res + (outDataSignalQuality,)
+        return res
 
     def getNSpeakers(self):
         return len(self.speakers)
@@ -334,10 +408,26 @@ class AudioBatchData(Dataset):
                            totSize, numWorkers, remove_artefacts)
 
 
-def loadFile(data):
-    speaker, fullPath = data
+def loadFile(data, signal_quality_step=None):
+    info1, info2 = data
+
+    if isinstance(info1, int):
+        # without signal quality estimations
+        seq_info = info1, info2
+        signal_quality_path = None
+    else:
+        seq_info, signal_quality_path = info1, info2
+
+    speaker, fullPath = seq_info
     seqName = fullPath.stem
-    seq = torchaudio.load(fullPath)[0].mean(dim=0)
+
+    # Load audio
+    seq = torchaudio.load(str(fullPath))[0].mean(dim=0)
+    # Load signal quality estimations
+    if signal_quality_path is not None:
+        signal_quality = torch.cat(torch.load(signal_quality_path), dim=1)
+        seq = seq[:signal_quality.shape[0]*signal_quality_step]
+        return speaker, seqName, seq, signal_quality
     return speaker, seqName, seq
 
 class PeakNorm(object):
@@ -669,8 +759,13 @@ class SameSpeakerSampler(Sampler):
 
 def extractLength(couple):
     speaker, locPath = couple
-    info = torchaudio.info(str(locPath))[0]
-    return info.length
+    try:
+        info = torchaudio.info(str(locPath))
+        dur = info.num_frames
+    except:
+        info = torchaudio.info(str(locPath))[0]
+        dur = info.length
+    return dur
 
 
 def findAllSeqs(dirName,

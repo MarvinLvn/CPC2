@@ -1,15 +1,19 @@
 ### Installation
 
-The code relies on [pyannote-audio](https://github.com/pyannote/pyannote-audio), a python package 
-for speaker diarization: speech activity detection, speaker change detection, speaker embedding.
+You can clone this repo, and install all required dependencies by running:
 
 ```bash
-# Step 1: git clone the voice type classifier repo as well as pyannote-audio dependency
+# Step 1: git clone this repo
 $ git clone https://github.com/MarvinLvn/CPC2.git
 $ cd CPC2
 
 # Step 2 : create conda env called "cpc2", installing all the required dependencies
 $ conda env create -f env.yml
+
+# Step 3: install WavAugment
+$ git clone https://github.com/facebookresearch/WavAugment.git && cd WavAugment
+& git checkout 357b2f9f09832cbe64ff76633eea8dbd5f1e97d1
+& pip install -e .
 ```
 
 Make sure [sox](http://sox.sourceforge.net/) is installed too.

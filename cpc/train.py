@@ -42,7 +42,9 @@ def getCriterion(args, downsampling, nSpeakers, nPhones):
                                                        sizeInputSeq=sizeInputSeq,
                                                        multihead_rnn=args.multihead_rnn,
                                                        transformer_pruning=args.transformer_pruning,
-                                                       n_skipped=args.n_skipped
+                                                       n_skipped=args.n_skipped,
+                                                       growth_rate=args.growth_rate,
+                                                       inflection_point_x=args.inflection_point_x
                                                        )
     elif args.pathPhone is not None:
         if not args.CTC:
@@ -83,10 +85,13 @@ def trainStep(dataLoader,
     iter = 0
 
     for step, full_data in enumerate(dataLoader):
-        sequence, label = full_data
+        sequence, label, *signal_quality = full_data
         sequence = sequence.cuda(non_blocking=True)
         label = label.cuda(non_blocking=True)
-
+        if len(signal_quality):
+            signal_quality = signal_quality[0].cuda(non_blocking=True)
+        else:
+            signal_quality = None
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
         b = past.size(0)
         n_examples += past.size(0)
@@ -99,8 +104,7 @@ def trainStep(dataLoader,
         label = label[:b]
 
 
-        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
-
+        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, signal_quality)
         totLoss = allLosses.sum()
         totLoss.backward()
 
@@ -150,8 +154,7 @@ def valStep(dataLoader,
     iter = 0
 
     for step, full_data in enumerate(dataLoader):
-
-        sequence, label, *spkr_emb = full_data
+        sequence, label, *signal_quality = full_data
 
         sequence = sequence.cuda(non_blocking=True)
         label = label.cuda(non_blocking=True)
@@ -168,13 +171,7 @@ def valStep(dataLoader,
             encoded_data = encoded_data[b:, ...]
             label = label[:b]
 
-            if len(spkr_emb) != 0:
-                # with speaker embedding
-                spkr_emb = spkr_emb[0].cuda(non_blocking=True)
-                allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
-            else:
-                # without speaker embedding
-                allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
+            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
 
         if "locLoss_val" not in logs:
             logs["locLoss_val"] = np.zeros(allLosses.size(1))
@@ -286,6 +283,9 @@ def main(argv):
     if args.nGPU == 0:
         args.nGPU = 1
 
+    if args.signal_quality_path is not None and not os.path.exists(args.signal_quality_path):
+        raise ValueError("%s can't be found. Are you sure you provided the right location ?" % args.signal_quality_path)
+
     batchSize = args.nGPU * args.batchSizeGPU
 
     if args.distributed:
@@ -300,6 +300,7 @@ def main(argv):
     print('-' * 50)
 
     seqNames, speakers = findAllSeqs(args.pathDB,
+                                     no_speaker=args.no_speaker,
                                      extension=args.file_extension,
                                      loadCache=not args.ignore_cache,
                                      format=args.naming_convention,
@@ -412,6 +413,9 @@ def main(argv):
                                   augment_past=args.augment_past,
                                   augmentation=augmentation_factory(args, noiseDataset),
                                   keep_temporality=args.samplingType == "temporalsamespeaker",
+                                  signal_quality_path=args.signal_quality_path,
+                                  signal_quality_step=args.signal_quality_step,
+                                  signal_quality_mode=args.signal_quality_mode,
                                   past_equal_future=args.past_equal_future)
 
     print("Training dataset loaded\n")
@@ -449,6 +453,7 @@ def main(argv):
     cpcModel.supervised = args.supervised
 
     # Training criterion
+    print(args)
     if args.load is not None and args.loadCriterion:
         cpcCriterion = loadCriterion(args.load[0], cpcModel.gEncoder.DOWNSAMPLING,
                                      len(speakers), nPhones)
@@ -634,14 +639,13 @@ def parseArgs(argv):
 
     if args.samplingType == "temporalsamespeaker" and \
             args.naming_convention not in ['id_spkr_onset_offset', 'id_spkr_onset_offset_spkr_onset_offset', 'spkr-id',
-                                           'spkr_id_nb', 'no_speaker', 'full_seedlings']:
+                                           'spkr_id_nb', 'spkr-id-nb', 'no_speaker', 'full_seedlings']:
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
                          "to id_spkr_onset_offset (daylong recordings) or spkr-id (librispeech) or spkr_id_nb (inftrain)"
                          "as we need to sort the files temporally.")
 
     #if args.samplingType == "temporalsamespeaker":
     #    args.ignore_cache = True
-
 
     if not args.meta_aug and (args.meta_aug_type is not None or args.meta_aug_type == "none"):
         raise ValueError("You specified parameters --meta_aug_type without having activated --meta_aug flag.")

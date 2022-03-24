@@ -5,21 +5,25 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - pytorch=1.6.0
-  - torchvision
-  - cudatoolkit=10.2
-  - psutil
-  - pip
-  - openblas-devel
-  - tqdm
-  - nose
-  - librosa
-  - pysoundfile
+  - python>=3.6
+  - cudatoolkit=9.2
   - cython
-  - sox
+  - nose
+  - numpy>=1.20
+  - pip
+  - psutil
+  - pysoundfile
+  - pytorch>=1.5.0
+  - torchvision
+  - torchaudio
+  - tqdm
+  - joblib
+  - openblas-devel
+  - librosa
+  - pandas=1.2.4
   - pip:
     - progressbar2
     - matplotlib
-    - torchaudio==0.6.0
+    - sox
     - git+ssh://git@github.com/fairinternal/speech_augment.git@9f0564344740120f5b3687c24d5e009674d51aac#egg=augment
     - git+ssh://git@github.com/asteroid-team/torch-audiomentations.git@f30603bd6c34c6f1a9069b785464656a8c48a47a

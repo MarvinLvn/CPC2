@@ -204,7 +204,9 @@ class CPCUnsupersivedCriterion(BaseCriterion):
                  sizeInputSeq=116,
                  multihead_rnn=False,
                  transformer_pruning=0,
-                 n_skipped=0):
+                 n_skipped=0,
+                 growth_rate=None,            # growth rate in the sigmoid function
+                 inflection_point_x=None):   # where is the inflection point in the sigmoid
 
         super(CPCUnsupersivedCriterion, self).__init__()
 
@@ -222,7 +224,10 @@ class CPCUnsupersivedCriterion(BaseCriterion):
         self.nSkipped = n_skipped
         self.nPredicts = nPredicts
         self.negativeSamplingExt = negativeSamplingExt
-        self.lossCriterion = nn.CrossEntropyLoss()
+        self.lossCriterion = nn.CrossEntropyLoss(reduction='none')
+        self.growth_rate = growth_rate
+        self.inflection_point_x = inflection_point_x
+        self.weighting_function = lambda x: 1 / (1 + torch.exp(-growth_rate * (x - inflection_point_x)))
 
         if mode not in [None, "reverse"]:
             raise ValueError("Invalid mode")
@@ -283,7 +288,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
     def getInnerLoss(self):
         return "orthoLoss", self.orthoLoss * self.wPrediction.orthoCriterion()
 
-    def getPrediction(self, cFeature, encodedData, label, speaker_embedding=None):
+    def getPrediction(self, cFeature, encodedData, label):
         if self.mode == "reverse":
             encodedData = torch.flip(encodedData, [1])
             cFeature = torch.flip(cFeature, [1])
@@ -321,27 +326,37 @@ class CPCUnsupersivedCriterion(BaseCriterion):
 
         return self.wPrediction(cFeature, out)
 
-    def forward(self, cFeature, encodedData, label):
+    def forward(self, cFeature, encodedData, label, signal_quality=None):
 
         batchSize, seqSize, _ = cFeature.size()
         windowSize = seqSize - self.nPredicts
         predictions, labelLoss = self.getPrediction(cFeature, encodedData, label)
+
+        if signal_quality is not None:
+            signal_quality = signal_quality.mean(dim=1)
+            quality_weighting = self.weighting_function(signal_quality)
+            quality_weighting = quality_weighting.unsqueeze(1).repeat(1, windowSize)
+            quality_weighting = quality_weighting.contiguous().view(-1)
+        else:
+            quality_weighting = torch.ones(batchSize * windowSize, device='cuda')
 
         outLosses = [0 for x in range(self.nPredicts)]
         outAcc = [0 for x in range(self.nPredicts)]
 
         for k, locPreds in enumerate(predictions[:self.nPredicts]):
             locPreds = locPreds.permute(0, 2, 1)
+
             locPreds = locPreds.contiguous().view(-1, locPreds.size(2))
+
             lossK = self.lossCriterion(locPreds, labelLoss)
+            lossK = (quality_weighting * lossK).sum() / quality_weighting.sum()
+
             outLosses[k] += lossK.view(1, -1)
             _, predsIndex = locPreds.max(1)
             outAcc[k] += torch.sum(predsIndex == labelLoss).float().view(1, -1)
 
-
         outLosses = outLosses[self.nSkipped:]
         outAcc = outAcc[self.nSkipped:]
-
         return torch.cat(outLosses, dim=1), \
             torch.cat(outAcc, dim=1) / (windowSize * batchSize)
 

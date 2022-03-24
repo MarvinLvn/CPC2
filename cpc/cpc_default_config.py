@@ -67,23 +67,6 @@ def set_default_cpc_config(parser):
                        "classification on the encoder's output.")
     group.add_argument('--random_seed', type=int, default=None,
                        help="Set a specific random seed.")
-    group.add_argument('--speakerEmbedding', type=str, default=None,
-                       help="(Optional) Path to the frame-level speaker embeddings files that will "
-                            "be fed to the prediction network with "
-                            "speaker embeddings along with the usual sequence (.npy format) or"
-                            "that will be used to build the batches")
-    group.add_argument('--speakerEmbeddingStep', type=int, default=160,
-                       help="Step used for the speaker embeddings in number of frames. "
-                            "Should be equal to the step used in the encoded representations. "
-                            "Default to 160 frames = 10 ms (if --speakerEmbedding is activated)")
-    group.add_argument('--size_speaker_emb', type=int, default=512,
-                       help="Feature size of the speaker embedding (if --speakerEmbedding is activated)")
-    group.add_argument('--dout_speaker_emb', type=int, default=0,
-                       help="If > 0, will add a linear layer on top of the speaker embeddings of size "
-                            "--dout_speaker_emb before concatenating the resulting representations "
-                            "to the context-dependent representations (c). If == 0, will concatenate "
-                            "the speaker embeddings directly to the context-dependent reprensentations."
-                            "(if --speakerEmbedding is activated).")
     group.add_argument('--arMode', default='LSTM',
                        choices=['GRU', 'LSTM', ' ', 'no_ar', 'transformer'],
                        help="Architecture to use for the auto-regressive "
@@ -119,6 +102,19 @@ def set_default_cpc_config(parser):
     group.add_argument('--mask_length', type=int, default=10,
                                help="Number of frames a mask will cover "
                                     "(only supported for CPC models for now).")
+    group.add_argument('--signal_quality_path', type=str, default=None, help='Path to the folder'
+                                                                             'containing estimated signal quality .pt'
+                                                                             'files (signal-quality aware loss)')
+    group.add_argument('--signal_quality_step', type=int, default=1600,
+                       help="Step used for the signal quality estimations in number of frames. "
+                            "Default to 1600 frames = 100 ms (only used if --signal_quality_path is not None.)")
+    group.add_argument('--signal_quality_mode', type=str, choices=['snr', 'c50', 'snr_c50'], default='snr')
+    group.add_argument('--growth_rate', type=float, default=10,
+                       help="Growth rate to consider in the sigmoid weighting function"
+                            "(100: very sharp, won't learn on noisy segments; 10: will learn a bit on noisy segments).")
+    group.add_argument('--inflection_point_x', type=float, default=0.5,
+                       help="X coordinate of the inflection point to consider in the sigmoid weighting function "
+                            "(0.5: will center the sigmoid function at x=0.5).")
     group.add_argument('--n_skipped', type=int, default=0,
                                help="Number of time steps that will be skipped in the prediction task.")
     group.add_argument('--no_speaker', action='store_true',
