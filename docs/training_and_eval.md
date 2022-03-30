@@ -62,6 +62,35 @@ Then the following line will submit the job:
 sbatch -o my_first_model.txt train_CPC_multi_machines.txt
 ```
 
+### Signal-quality aware loss
+
+(Currently works with Alodie's repo; needs to integrate her code)
+First, let us predict signal quality measures of the training set:
+
+```bash
+python CPC_torch/cpc/eval/inference_vad.py --pathDB $PATH_DB \
+    --pathPretrained model/CPC_libribig_600_noise_smooth_reverb_reverse_FT_librispeech/checkpoint_24.pt --pathOut $PATH_PREDICTIONS --file_extension .wav \
+    --ignore_cache --hiddenGar 512 --hiddenEncoder 512 --window_shift 160 --no_sentence_level --no_speech 
+```
+
+where `$PATH_DB` is the path to the training set, and `$PATH_PREDICTIONS` is the folder where to store predictions. The command above will create `.pt` files, with each line of a `.pt` file being the predicted snr (first column) and the 
+predicted c50 (second column) for a 100ms frame.
+
+Once this has been done, we can train the model using the signal-quality aware loss by running:
+
+```bash
+python CPC_audio/cpc/train.py --pathDB $PATH_DB --pathCheckpoint $PATH_OUT --file_extension .wav --n_process_loader 1 --save_step 5 \
+  --schedulerRamp 10 --nLevelsGRU 2 --augment_past --augment_type pitch artificial_reverb --shift_max 300 \
+  --multihead_rnn --samplingType samespeaker --nEpoch 200 \
+  --signal_quality_path $PATH_PREDICTIONS --signal_quality_mode $SIGNAL_QUALITY_MODE --growth_rate $GROWTH_RATE --inflection_point_x $INFLECTION_POINT_X
+```
+
+where:
+    - `$PATH_OUT` is the folder where checkpoints will be stored. 
+    - `$SIGNAL_QUALITY_MODE` belongs to [snr,c50,snr_c50] and indicates which signal quality measure to use. Measures are min-max scaled between 0 and 1.
+    - `$GROWTH_RATE` is the measure of the growth rate to use in the sigmoid weighting function (100 --> sharp profile, i.e the model won't learn on noisy segments, 10 --> smooth profile, i.e. the model will learn a bit on noisy segments)
+    - `$INFLECTION_POINT_X` corresponds to the center of the sigmoid weighting function (knowing that the signal quality measures lies in [0, 1]). Default to 0.5.
+
 ### Bonus: How to train a K-means model from CPC representations?
 
 ```bash

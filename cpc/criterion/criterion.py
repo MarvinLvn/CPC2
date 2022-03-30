@@ -331,7 +331,6 @@ class CPCUnsupersivedCriterion(BaseCriterion):
         batchSize, seqSize, _ = cFeature.size()
         windowSize = seqSize - self.nPredicts
         predictions, labelLoss = self.getPrediction(cFeature, encodedData, label)
-
         if signal_quality is not None:
             signal_quality = signal_quality.mean(dim=1)
             quality_weighting = self.weighting_function(signal_quality)
@@ -349,7 +348,9 @@ class CPCUnsupersivedCriterion(BaseCriterion):
             locPreds = locPreds.contiguous().view(-1, locPreds.size(2))
 
             lossK = self.lossCriterion(locPreds, labelLoss)
-            lossK = (quality_weighting * lossK).sum() / quality_weighting.sum()
+            lossK = torch.mean(quality_weighting * lossK)
+            #lossK = (quality_weighting * lossK).sum() / quality_weighting.sum()
+
 
             outLosses[k] += lossK.view(1, -1)
             _, predsIndex = locPreds.max(1)
@@ -357,6 +358,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
 
         outLosses = outLosses[self.nSkipped:]
         outAcc = outAcc[self.nSkipped:]
+
         return torch.cat(outLosses, dim=1), \
             torch.cat(outAcc, dim=1) / (windowSize * batchSize)
 
