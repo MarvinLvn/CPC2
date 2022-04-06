@@ -227,7 +227,7 @@ class CPCUnsupersivedCriterion(BaseCriterion):
         self.lossCriterion = nn.CrossEntropyLoss(reduction='none')
         self.growth_rate = growth_rate
         self.inflection_point_x = inflection_point_x
-        self.weighting_function = lambda x: 1 / (1 + torch.exp(-growth_rate * (x - inflection_point_x)))
+        self.weighting_function = lambda x: 0.00001 + 1 / (1 + torch.exp(-growth_rate * (x - inflection_point_x)))
 
         if mode not in [None, "reverse"]:
             raise ValueError("Invalid mode")
