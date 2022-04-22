@@ -472,9 +472,16 @@ def main(argv):
     g_params = list(cpcCriterion.parameters()) + list(cpcModel.parameters())
 
     lr = args.learningRate
-    optimizer = torch.optim.Adam(g_params, lr=lr,
-                                 betas=(args.beta1, args.beta2),
-                                 eps=args.epsilon)
+    if args.optimizer == 'adam':
+        print("Using Adam optimizer.")
+        optimizer = torch.optim.Adam(g_params, lr=lr,
+                                     betas=(args.beta1, args.beta2),
+                                     eps=args.epsilon)
+    elif args.optimizer == 'sgd':
+        print("Using SGD optimizer.")
+        optimizer = torch.optim.SGD(g_params, lr=lr, momentum=0.9)
+    else:
+        raise ValueError("Unsupported optimizer: %s" % args.optimizer)
 
     if loadOptimizer:
         print("Loading optimizer " + args.load[0])

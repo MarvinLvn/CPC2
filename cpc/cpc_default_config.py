@@ -23,6 +23,8 @@ def set_default_cpc_config(parser):
                        help='Number of steps to predict.')
     group.add_argument('--negativeSamplingExt', type=int, default=128,
                        help='Number of negative samples to take.')
+    group.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'],
+                      help='Optimizer to use (default to adam).')
     group.add_argument('--learningRate', type=float, default=2e-4)
     group.add_argument('--schedulerStep', type=int, default=-1,
                        help='Step of the learning rate scheduler: at each '
