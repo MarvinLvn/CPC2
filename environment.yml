@@ -25,5 +25,3 @@ dependencies:
     - progressbar2
     - matplotlib
     - sox
-    - git+ssh://git@github.com/fairinternal/speech_augment.git@9f0564344740120f5b3687c24d5e009674d51aac#egg=augment
-    - git+ssh://git@github.com/asteroid-team/torch-audiomentations.git@f30603bd6c34c6f1a9069b785464656a8c48a47a
