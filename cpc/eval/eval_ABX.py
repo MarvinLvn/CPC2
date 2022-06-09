@@ -17,8 +17,7 @@ def reduce_sparse_data(quotient, divisor):
     return quotient / (1e-08 * (divisor == 0) + divisor)
 
 
-def ABX(args,
-        feature_function,
+def ABX(feature_function,
         path_item_file,
         seq_list,
         distance_mode,
@@ -26,11 +25,12 @@ def ABX(args,
         modes,
         cuda=False,
         max_x_across=5,
-        max_size_group=30):
+        max_size_group=30,
+        normalize=True):
 
     # ABX dataset
     ABXDataset = abx_it.ABXFeatureLoader(path_item_file, seq_list,
-                                         feature_function, step_feature, True)
+                                         feature_function, step_feature, normalize)
 
     if cuda:
         ABXDataset.cuda()
@@ -40,6 +40,7 @@ def ABX(args,
 
     # Output
     scores = {}
+
     # ABX within
     if 'within' in modes:
         print("Computing ABX within speakers...")
@@ -90,7 +91,6 @@ def ABX(args,
         divisor_speaker = index_speaker.sum(dim=0).sum(dim=2)
         phone_confusion = reduce_sparse_data(group_confusion.sum(dim=0).sum(dim=2),
                                              divisor_speaker)
-
         scores['across'] = (phone_confusion.sum() /
                              (divisor_speaker > 0).sum()).item()
 
@@ -108,7 +108,7 @@ def update_base_parser(parser):
     parser.add_argument('--mode', type=str, default='all',
                         choices=['all', 'within', 'across'],
                         help="Type of ABX score to compute")
-    parser.add_argument("--max_size_group", type=int, default=10,
+    parser.add_argument("--max_size_group", type=int, default=20,
                         help="Max size of a group while computing the"
                              "ABX score")
     parser.add_argument("--max_x_across", type=int, default=5,
@@ -116,6 +116,7 @@ def update_base_parser(parser):
                              "number of speaker X to sample per couple A,B")
     parser.add_argument("--out", type=str, default=None,
                         help="Path where the results should be saved")
+    parser.add_argument("--level_gru", type=int, default=None)
 
 
 def parse_args(argv):
@@ -144,13 +145,13 @@ def parse_args(argv):
                                    'will contain exactly max_size_seq frames.')
     parser_checkpoint.add_argument('--file_extension', type=str,
                                    default='.wav',
-                                   help='Extension of each audio file in the '
+                                   help='Extension of ecah audio file in the '
                                    'dataset.')
     parser_checkpoint.add_argument('--get_encoded', action='store_true',
                                    help='If activated, compute the ABX score '
                                    'using the output of the encoder network.')
-    parser_checkpoint.add_argument('--cca_projection', type=str, default=None, required=False,
-                                   help='Path to a pre-trained CCA model (.pkl format).')
+    parser_checkpoint.add_argument('-n', '--num_processes', type=int, default=40,
+                                   help='Number of processes to use for group computation')
 
     parser_db = subparsers.add_parser('from_pre_computed')
     update_base_parser(parser_db)
@@ -170,12 +171,14 @@ def main(argv):
     args = parse_args(argv)
 
     if args.load == 'from_checkpoint':
+        updateConfig = None
+        if args.level_gru is not None:
+            updateConfig = argparse.Namespace(nLevelsGRU=args.level_gru)
         # Checkpoint
-        model = loadModel([args.path_checkpoint])[0]
+        model = loadModel([args.path_checkpoint], updateConfig=updateConfig)[0]
         model.gAR.keepHidden = True
         # Feature maker
-        feature_maker = FeatureModule(model, args.get_encoded,
-                                      cca_projection=args.cca_projection).cuda().eval()
+        feature_maker = FeatureModule(model, args.get_encoded).cuda().eval()
 
         def feature_function(x): return buildFeature(feature_maker, x,
                                                      seqNorm=args.seq_norm,
@@ -202,7 +205,7 @@ def main(argv):
     if args.debug:
         seq_list = seq_list[:1000]
 
-    scores = ABX(args, feature_function, args.path_item_file,
+    scores = ABX(feature_function, args.path_item_file,
                  seq_list, distance_mode,
                  step_feature, modes,
                  cuda=args.cuda,
@@ -211,7 +214,7 @@ def main(argv):
 
     out_dir = Path(args.path_checkpoint).parent if args.out is None \
         else Path(args.out)
-    out_dir.mkdir(exist_ok=True, parents=True)
+    out_dir.mkdir(exist_ok=True)
 
     path_score = out_dir / 'ABX_scores.json'
     with open(path_score, 'w') as file:

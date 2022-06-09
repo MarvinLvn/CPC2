@@ -70,7 +70,7 @@ def set_default_cpc_config(parser):
     group.add_argument('--random_seed', type=int, default=None,
                        help="Set a specific random seed.")
     group.add_argument('--arMode', default='LSTM',
-                       choices=['GRU', 'LSTM', ' ', 'no_ar', 'transformer'],
+                       choices=['GRU', 'LSTM', 'RNN', 'no_ar', 'transformer'],
                        help="Architecture to use for the auto-regressive "
                        "network (default is lstm).")
     group.add_argument('--nLevelsGRU', type=int, default=1,

@@ -15,7 +15,7 @@ def normalize_with_singularity(x):
     cosine distance from any non-null vector.
     """
     N, S, H = x.size()
-    norm_x = (x**2).sum(dim=2, keepdim=True)
+    norm_x = (x**2).sum(dim=2, keepdim=True) + 1e-12
 
     x /= torch.sqrt(norm_x)
     zero_vals = (norm_x == 0).view(N, S)
@@ -160,34 +160,31 @@ class ABXFeatureLoader:
         print("Building the input features...")
         bar = progressbar.ProgressBar(maxval=len(seqList))
         bar.start()
-        skipped = 0
-        skipped_files = 0
 
         for index, vals in enumerate(seqList):
 
             fileID, file_path = vals
             bar.update(index)
             if fileID not in files_data:
-                skipped_files += 1
                 continue
 
             features = feature_maker(file_path)
-
             if normalize:
                 features = normalize_with_singularity(features)
 
             features = features.detach().cpu()
             features = features.view(features.size(1), features.size(2))
+
             phone_data = files_data[fileID]
 
             for phone_start, phone_end, context_id, phone_id, speaker_id in phone_data:
+
                 index_start = max(
                     0, int(math.ceil(self.stepFeature * phone_start - 0.5)))
                 index_end = min(features.size(0),
                                 int(math.floor(self.stepFeature * phone_end - 0.5)))
 
                 if index_start >= features.size(0) or index_end <= index_start:
-                    skipped += 1
                     continue
 
                 loc_size = index_end - index_start
@@ -198,8 +195,6 @@ class ABXFeatureLoader:
 
         bar.finish()
         print("...done")
-        print("Skipped because index_start, index_end : %d" % skipped)
-        print("Skipped because wrong filename : %d" % skipped_files)
 
         self.data = torch.cat(data, dim=0)
         self.feature_dim = self.data.size(1)
