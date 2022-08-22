@@ -9,7 +9,7 @@ $ cd CPC2
 $ git checkout minibatch_building
 
 # Step 2 : create conda env called "cpc2", installing all the required dependencies
-$ conda env create -f env.yml
+$ conda env create -f environment.yml
 
 # Step 3: install WavAugment
 $ git clone https://github.com/facebookresearch/WavAugment.git && cd WavAugment
