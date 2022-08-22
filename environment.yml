@@ -25,3 +25,4 @@ dependencies:
     - progressbar2
     - matplotlib
     - sox
+    - torch-audiomentations
