@@ -17,8 +17,7 @@ def reduce_sparse_data(quotient, divisor):
     return quotient / (1e-08 * (divisor == 0) + divisor)
 
 
-def ABX(args,
-        feature_function,
+def ABX(feature_function,
         path_item_file,
         seq_list,
         distance_mode,
@@ -26,11 +25,12 @@ def ABX(args,
         modes,
         cuda=False,
         max_x_across=5,
-        max_size_group=30):
+        max_size_group=30,
+        normalize=True):
 
     # ABX dataset
     ABXDataset = abx_it.ABXFeatureLoader(path_item_file, seq_list,
-                                         feature_function, step_feature, True)
+                                         feature_function, step_feature, normalize)
 
     if cuda:
         ABXDataset.cuda()
@@ -47,8 +47,7 @@ def ABX(args,
         ABXIterator = ABXDataset.get_iterator('within', max_size_group)
         group_confusion = abx_g.get_abx_scores_dtw_on_group(ABXIterator,
                                                             distance_function,
-                                                            ABXIterator.symmetric,
-                                                            nprocess=args.num_processes)
+                                                            ABXIterator.symmetric)
         n_data = group_confusion._values().size(0)
         index_ = torch.sparse.LongTensor(group_confusion._indices(),
                                          torch.ones((n_data),
@@ -75,8 +74,7 @@ def ABX(args,
 
         group_confusion = abx_g.get_abx_scores_dtw_on_group(ABXIterator,
                                                             distance_function,
-                                                            ABXIterator.symmetric,
-                                                            nprocess=args.num_processes)
+                                                            ABXIterator.symmetric)
         n_data = group_confusion._values().size(0)
         index_ = torch.sparse.LongTensor(group_confusion._indices(),
                                          torch.ones((n_data),
@@ -93,7 +91,6 @@ def ABX(args,
         divisor_speaker = index_speaker.sum(dim=0).sum(dim=2)
         phone_confusion = reduce_sparse_data(group_confusion.sum(dim=0).sum(dim=2),
                                              divisor_speaker)
-
         scores['across'] = (phone_confusion.sum() /
                              (divisor_speaker > 0).sum()).item()
 
@@ -119,6 +116,7 @@ def update_base_parser(parser):
                              "number of speaker X to sample per couple A,B")
     parser.add_argument("--out", type=str, default=None,
                         help="Path where the results should be saved")
+    parser.add_argument("--level_gru", type=int, default=None)
 
 
 def parse_args(argv):
@@ -173,8 +171,11 @@ def main(argv):
     args = parse_args(argv)
 
     if args.load == 'from_checkpoint':
+        updateConfig = None
+        if args.level_gru is not None:
+            updateConfig = argparse.Namespace(nLevelsGRU=args.level_gru)
         # Checkpoint
-        model = loadModel([args.path_checkpoint])[0]
+        model = loadModel([args.path_checkpoint], updateConfig=updateConfig)[0]
         model.gAR.keepHidden = True
         # Feature maker
         feature_maker = FeatureModule(model, args.get_encoded).cuda().eval()
@@ -195,7 +196,6 @@ def main(argv):
     distance_mode = 'cosine'
 
     step_feature = 1 / args.feature_size
-    print(step_feature)
 
     # Get the list of sequences
     seq_list, _ = findAllSeqs(args.path_dataset, extension=args.file_extension)
@@ -205,7 +205,7 @@ def main(argv):
     if args.debug:
         seq_list = seq_list[:1000]
 
-    scores = ABX(args, feature_function, args.path_item_file,
+    scores = ABX(feature_function, args.path_item_file,
                  seq_list, distance_mode,
                  step_feature, modes,
                  cuda=args.cuda,

@@ -10,7 +10,7 @@ import argparse
 from .cpc_default_config import get_default_cpc_config
 from .dataset import parseSeqLabels
 from .model import CPCModel, ConcatenatedModel, CPCBertModel
-
+import pickle
 
 class FeatureModule(torch.nn.Module):
     r"""
@@ -18,23 +18,39 @@ class FeatureModule(torch.nn.Module):
     working with CPC trained features.
     """
 
-    def __init__(self, featureMaker, get_encoded, collapse=False):
+    def __init__(self, featureMaker, get_encoded, collapse=False, cca_projection=None):
         super(FeatureModule, self).__init__()
         self.get_encoded = get_encoded
         self.featureMaker = featureMaker
         self.collapse = collapse
+        self.cca_projection = None
+        if cca_projection:
+            assert cca_projection[-4:] == ".pkl"
+            print("Loading canonical correlation analysis model.")
+            with open(cca_projection, 'rb') as cca_file:
+                self.cca_projection = pickle.load(cca_file)
+
+    @property
+    def out_feature_dim(self):
+        if self.get_encoded:
+            return self.featureMaker.gEncoder.getDimOutput()
+        return self.featureMaker.gAR.getDimOutput()
 
     def getDownsamplingFactor(self):
         return self.featureMaker.gEncoder.DOWNSAMPLING
 
     def forward(self, data):
-
         batchAudio, label = data
+        if len(batchAudio.size()) == 4:
+            batchAudio = batchAudio[:, 0]
         cFeature, encoded, _ = self.featureMaker(batchAudio.cuda(), label)
         if self.get_encoded:
             cFeature = encoded
         if self.collapse:
             cFeature = cFeature.contiguous().view(-1, cFeature.size(2))
+        if self.cca_projection:
+            cFeature_np = self.cca_projection.transform(cFeature.cpu().numpy())
+            cFeature = torch.tensor(cFeature_np, dtype=cFeature.dtype, device=cFeature.device)
         return cFeature
 
 
@@ -158,6 +174,7 @@ def loadSupervisedCriterion(pathCheckpoint):
 
 
 def getCheckpointData(pathDir):
+
     if not os.path.isdir(pathDir):
         return None
     checkpoints = [x for x in os.listdir(pathDir)
@@ -168,6 +185,7 @@ def getCheckpointData(pathDir):
         return None
     checkpoints.sort(key=lambda x: int(os.path.splitext(x[11:])[0]))
     data = os.path.join(pathDir, checkpoints[-1])
+
     with open(os.path.join(pathDir, 'checkpoint_logs.json'), 'rb') as file:
         logs = json.load(file)
 
@@ -217,26 +235,25 @@ def getAR(args):
     return arNet
 
 
-def loadModel(pathCheckpoints, loadStateDict=True, intermediate_idx=0):
+def loadModel(pathCheckpoints, loadStateDict=True, updateConfig=None):
     models = []
     hiddenGar, hiddenEncoder = 0, 0
     for path in pathCheckpoints:
         print(f"Loading checkpoint {path}")
         _, _, locArgs = getCheckpointData(os.path.dirname(path))
-
-        if intermediate_idx != 0:
-            if intermediate_idx < locArgs.nLevelsGRU:
-                locArgs.nLevelsGRU = locArgs.nLevelsGRU- intermediate_idx
-            else:
-                raise ValueError("The AR network comprises %d layers. "
-                                 "You can't ask to extract the %d layer. " % (locArgs.nLevelsGRU,locArgs.nLevelsGRU-intermediate_idx))
-
         doLoad = locArgs.load is not None and \
             (len(locArgs.load) > 1 or
              os.path.dirname(locArgs.load[0]) != os.path.dirname(path))
 
+        if updateConfig is not None and not doLoad:
+            print(f"Updating the configuration file with ")
+            print(f'{json.dumps(vars(updateConfig), indent=4, sort_keys=True)}')
+            loadArgs(locArgs, updateConfig)
+
         if doLoad:
-            m_, hg, he = loadModel(locArgs.load, loadStateDict=False)
+            m_, hg, he = loadModel(locArgs.load,
+                                   loadStateDict=False,
+                                   updateConfig=updateConfig)
             hiddenGar += hg
             hiddenEncoder += he
         else:
@@ -331,6 +348,7 @@ def buildFeature(featureMaker, seqPath, strict=False,
             features = featureMaker((subseq, None))
             if seqNorm:
                 features = seqNormalization(features)
+
         out.append(features.detach().cpu())
         start += maxSizeSeq
 
@@ -340,8 +358,76 @@ def buildFeature(featureMaker, seqPath, strict=False,
             features = featureMaker((subseq, None))
             if seqNorm:
                 features = seqNormalization(features)
+
         delta = (sizeSeq - start) // featureMaker.getDownsamplingFactor()
         out.append(features[:, -delta:].detach().cpu())
+
+    out = torch.cat(out, dim=1)
+
+    return out
+
+
+def buildFeature_batch(featureMaker, seqPath, strict=False,
+                       maxSizeSeq=8000, seqNorm=False, batch_size=8):
+    r"""
+    Apply the featureMaker to the given file. Apply batch-computation
+    Arguments:
+        - featureMaker (FeatureModule): model to apply
+        - seqPath (string): path of the sequence to load
+        - strict (bool): if True, always work with chunks of the size
+                         maxSizeSeq
+        - maxSizeSeq (int): maximal size of a chunk
+        - seqNorm (bool): if True, normalize the output along the time
+                          dimension to get chunks of mean zero and var 1
+    Return:
+        a torch vector of size 1 x Seq_size x Feature_dim
+    """
+    if next(featureMaker.parameters()).is_cuda:
+        device = 'cuda'
+    else:
+        device = 'cpu'
+    seq = torchaudio.load(seqPath)[0]
+    sizeSeq = seq.size(1)
+
+    # Compute number of batches
+    n_chunks = sizeSeq // maxSizeSeq
+    n_batches = n_chunks // batch_size
+    if n_chunks % batch_size != 0:
+        n_batches += 1
+
+    out = []
+    # Treat each batch
+    for batch_idx in range(n_batches):
+        start = batch_idx * batch_size * maxSizeSeq
+        end = min((batch_idx + 1) * batch_size * maxSizeSeq, maxSizeSeq * n_chunks)
+        batch_seqs = (seq[:, start:end]).view(-1, 1, maxSizeSeq).to(device)
+        with torch.no_grad():
+            # breakpoint()
+            batch_out = featureMaker((batch_seqs, None))
+            for features in batch_out:
+                features = features.unsqueeze(0)
+                if seqNorm:
+                    features = seqNormalization(features)
+                out.append(features.detach().cpu())
+
+    # Remaining frames
+    if sizeSeq % maxSizeSeq >= featureMaker.getDownsamplingFactor():
+        remainders = sizeSeq % maxSizeSeq
+        if strict:
+            subseq = (seq[:, -maxSizeSeq:]).view(1, 1, -1).to(device)
+            with torch.no_grad():
+                features = featureMaker((subseq, None))
+                if seqNorm:
+                    features = seqNormalization(features)
+            delta = remainders // featureMaker.getDownsamplingFactor()
+            out.append(features[:, -delta:].detach().cpu())
+        else:
+            subseq = (seq[:, -remainders:]).view(1, 1, -1).to(device)
+            with torch.no_grad():
+                features = featureMaker((subseq, None))
+                if seqNorm:
+                    features = seqNormalization(features)
+            out.append(features.detach().cpu())
 
     out = torch.cat(out, dim=1)
     return out

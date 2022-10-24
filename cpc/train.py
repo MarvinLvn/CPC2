@@ -1,105 +1,51 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
 # This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# LICENSE file in the root directory of this source aee.
 import argparse
 import json
 import os
-import numpy as np
-import torch
+import random
+import sys
 import time
 from copy import deepcopy
-import random
-import psutil
-import sys
-import torchaudio
 
 import cpc.criterion as cr
+import cpc.feature_loader as fl
 import cpc.model as model
 import cpc.utils.misc as utils
-import cpc.feature_loader as fl
+import numpy as np
+import torch
 from cpc.cpc_default_config import set_default_cpc_config
-from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
-                        PeakNorm, ComposeTransform
-from cpc.criterion.research import CPCBertCriterion, DeepEmbeddedClustering, \
-    DeepClustering, CTCCLustering, buildNewPhoneDict
-from cpc.distributed_training.distributed_mode import init_distributed_mode
 from cpc.data_augmentation import augmentation_factory
+from cpc.distributed_training.distributed_mode import init_distributed_mode
+from cpc.dataset import AudioBatchData, findAllSeqs, filterSeqs, parseSeqLabels, \
+    PeakNorm
 
 torch.multiprocessing.set_sharing_strategy('file_system')
-
-def get_size_graph(var):
-
-    seen = set()
-    sizes = []
-
-    def get_int_size(x):
-        output=1
-        for b in x:
-            output*=b
-        return output
-
-    output_nodes = (var.grad_fn,) if not isinstance(var, tuple) else tuple(v.grad_fn for v in var)
-
-    def add_nodes(var):
-        if var not in seen:
-            if torch.is_tensor(var):
-                sizes.append(get_int_size(var.size()))
-            elif hasattr(var, 'variable'):
-                u = var.variable
-                sizes.append(get_int_size(u.size()))
-            else:
-                print(var)
-                sizes.append(1)
-            seen.add(var)
-            if hasattr(var, 'next_functions'):
-                for u in var.next_functions:
-                    if u[0] is not None:
-                        add_nodes(u[0])
-            if hasattr(var, 'saved_tensors'):
-                for t in var.saved_tensors:
-                    add_nodes(t)
-
-    # handle multiple outputs
-    if isinstance(var, tuple):
-        for v in var:
-            add_nodes(v.grad_fn)
-    else:
-        add_nodes(var.grad_fn)
-
-    print(sizes)
-    return len(sizes), sum(sizes)
-
 
 def getCriterion(args, downsampling, nSpeakers, nPhones):
     dimFeatures = args.hiddenGar if not args.onEncoder else args.hiddenEncoder
     if not args.supervised:
-        if args.cpc_mode == "bert":
-            cpcCriterion = CPCBertCriterion(args.hiddenGar,
-                                            args.hiddenEncoder,
-                                            args.negativeSamplingExt)
-        elif args.cpc_mode == 'none':
+        if args.cpc_mode == 'none':
             cpcCriterion = cr.NoneCriterion()
-            args.cluster_delay = 0
         else:
-            mode = "cumNorm" if args.normMode == "cumNorm" else args.cpc_mode
             sizeInputSeq = (args.sizeWindow // downsampling)
-            speakerEmbedding = None if not args.concatenate_spkr_emb else args.speakerEmbedding
             cpcCriterion = cr.CPCUnsupersivedCriterion(args.nPredicts,
                                                        args.hiddenGar,
                                                        args.hiddenEncoder,
                                                        args.negativeSamplingExt,
-                                                       mode=mode,
+                                                       mode=args.cpc_mode,
                                                        rnnMode=args.rnnMode,
                                                        dropout=args.dropout,
                                                        nSpeakers=nSpeakers,
-                                                       speakerEmbedding=speakerEmbedding,
                                                        sizeInputSeq=sizeInputSeq,
                                                        multihead_rnn=args.multihead_rnn,
                                                        transformer_pruning=args.transformer_pruning,
-                                                       size_speaker_emb=args.size_speaker_emb,
-                                                       dout_speaker_emb=args.dout_speaker_emb,
-                                                       n_skipped=args.n_skipped)
+                                                       n_skipped=args.n_skipped,
+                                                       growth_rate=args.growth_rate,
+                                                       inflection_point_x=args.inflection_point_x
+                                                       )
     elif args.pathPhone is not None:
         if not args.CTC:
             cpcCriterion = cr.PhoneCriterion(dimFeatures,
@@ -123,102 +69,11 @@ def loadCriterion(pathCheckpoint, downsampling, nSpeakers, nPhones):
     return criterion
 
 
-def adversarialTrainStep(dataLoader, cpcModel,
-                         cpcCriterion, optimizerCPC,
-                         speakerCriterion, optimizerPhone,
-                         clustering, loggingStep):
-
-    cpcModel.train()
-    speakerCriterion.train()
-    cpcCriterion.train()
-    start_time = time.perf_counter()
-
-    logs = {"loss_train_speak": 0, "acc_train_speak": 0}
-    iter, lastlogs, n_examples = 0, None, 0
-    for step, full_data in enumerate(dataLoader):
-
-        optimizerCPC.zero_grad()
-        optimizerPhone.zero_grad()
-
-        sequence, label = [x.cuda(non_blocking=True) for x in full_data]
-        past, future = sequence[:, 0, ...], sequence[:, 1, ...]
-
-        b = past.size(0)
-        n_examples += b
-
-        combined = torch.cat([past, future], dim=0)
-        label = torch.cat([label, label])
-
-        c_feature, encoded_data, label = cpcModel(combined, label)
-        c_feature = c_feature[:b, :, :]
-        encoded_data = encoded_data[b:, :, :]
-        label =label[:b]
-
-        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
-        lossSpeak, _ = speakerCriterion(c_feature, encoded_data, None)
-        totLoss = allLosses.sum() + lossSpeak.sum()
-
-        if clustering is not None:
-            lossCluster = clustering(c_feature, labelPhone)
-            totLoss += lossCluster.sum()
-
-        if "locLoss_train_cpc" not in logs:
-            logs["locLoss_train_cpc"] = np.zeros(allLosses.size(1))
-            logs["locAcc_train_cpc"] = np.zeros(allLosses.size(1))
-            if clustering is not None:
-                logs["lossCluster_train"] = np.zeros(lossCluster.size(1))
-
-        logs["loss_train_speak"] += (lossSpeak.mean(dim=0).view(1)
-                                     ).detach().cpu().numpy()
-
-        logs["locLoss_train_cpc"] += (allLosses.mean(dim=0)
-                                      ).detach().cpu().numpy()
-        if clustering is not None:
-            logs["lossCluster_train"] += (lossCluster.mean(dim=0)
-                                          ).detach().cpu().numpy()
-        logs["locAcc_train_cpc"] += (allAcc.mean(dim=0)).cpu().numpy()
-
-        if clustering is not None:
-            totLoss += lossCluster.sum()
-        totLoss.backward()
-        optimizerCPC.step()
-        optimizerPhone.zero_grad()
-
-        lossSpeak, accSpeak = speakerCriterion(
-            c_feature.detach(), encoded_data.detach(), label)
-
-        totLoss = lossSpeak.sum()
-        totLoss.backward()
-        optimizerPhone.step()
-
-        logs["acc_train_speak"] += (accSpeak.mean(dim=0)).cpu().numpy()
-        iter += 1
-
-        if (step + 1) % loggingStep == 0:
-            new_time = time.perf_counter()
-            elapsed = new_time - start_time
-            print(f"Update {step + 1}")
-            print(f"elapsed: {elapsed:.1f} s")
-            print(
-                f"{1000.0 * elapsed / loggingStep:.1f} ms per batch, {1000.0 * elapsed / n_examples:.1f} ms / example")
-            locLogs = utils.update_logs(logs, loggingStep, lastlogs)
-            lastlogs = deepcopy(logs)
-            utils.show_logs("Training loss", locLogs)
-            start_time, n_examples = new_time, 0
-
-    logs = utils.update_logs(logs, iter)
-    logs["iter"] = iter
-    utils.show_logs(
-        f"Average training loss on epoch ({iter+1} updates) :", logs)
-    return logs
-
-
 def trainStep(dataLoader,
               cpcModel,
               cpcCriterion,
               optimizer,
               scheduler,
-              clustering,
               loggingStep):
 
     cpcModel.train()
@@ -229,27 +84,29 @@ def trainStep(dataLoader,
     logs, lastlogs = {}, None
     iter = 0
 
-
     for step, full_data in enumerate(dataLoader):
-        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
+        sequence, label, *signal_quality = full_data
+        sequence = sequence.cuda(non_blocking=True)
+        label = label.cuda(non_blocking=True)
+        if len(signal_quality):
+            signal_quality = signal_quality[0].cuda(non_blocking=True)
+        else:
+            signal_quality = None
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
-
         b = past.size(0)
-        n_examples += b
+        n_examples += past.size(0)
 
         combined = torch.cat([past, future], dim=0)
         label = torch.cat([label, label])
         c_feature, encoded_data, label = cpcModel(combined, label)
         c_feature = c_feature[:b, :, :]
         encoded_data = encoded_data[b:, :, :]
-        label =label[:b]
-        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
+        label = label[:b]
+
+
+        allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, signal_quality)
         totLoss = allLosses.sum()
         totLoss.backward()
-
-        if clustering is not None:
-            lossCluster = clustering(c_feature, label)
-            totLoss += lossCluster.sum()
 
         # Show grads ?
         optimizer.step()
@@ -259,15 +116,11 @@ def trainStep(dataLoader,
             if "locLoss_train" not in logs:
                 logs["locLoss_train"] = np.zeros(allLosses.size(1))
                 logs["locAcc_train"] = np.zeros(allLosses.size(1))
-                if clustering is not None:
-                    logs["lossCluster_train"] = np.zeros(lossCluster.size(1))
 
             iter += 1
             logs["locLoss_train"] += (allLosses.mean(dim=0)).detach().cpu().numpy()
             logs["locAcc_train"] += (allAcc.mean(dim=0)).cpu().numpy()
-            if clustering is not None:
-                logs["lossCluster_train"] += (lossCluster.mean(dim=0)
-                                              ).detach().cpu().numpy()
+
             if (step + 1) % loggingStep == 0:
                 new_time = time.perf_counter()
                 elapsed = new_time - start_time
@@ -275,7 +128,7 @@ def trainStep(dataLoader,
                 print(f"elapsed: {elapsed:.1f} s")
                 print(
                     f"{1000.0 * elapsed / loggingStep:.1f} ms per batch, {1000.0 * elapsed / n_examples:.1f} ms / example")
-                locLogs = utils.update_logs(logs, loggingStep, lastlogs)
+                locLogs = utils.update_logs(logs, iter, lastlogs)
                 lastlogs = deepcopy(logs)
                 utils.show_logs("Training loss", locLogs)
                 start_time, n_examples = new_time, 0
@@ -291,8 +144,7 @@ def trainStep(dataLoader,
 
 def valStep(dataLoader,
             cpcModel,
-            cpcCriterion,
-            clustering):
+            cpcCriterion):
 
     cpcCriterion.eval()
     cpcModel.eval()
@@ -302,7 +154,10 @@ def valStep(dataLoader,
     iter = 0
 
     for step, full_data in enumerate(dataLoader):
-        sequence, label, spkr_emb = [x.cuda(non_blocking=True) for x in full_data]
+        sequence, label, *signal_quality = full_data
+
+        sequence = sequence.cuda(non_blocking=True)
+        label = label.cuda(non_blocking=True)
 
         past, future = sequence[:, 0, ...], sequence[:, 1, ...]
         label = torch.cat([label, label])
@@ -314,23 +169,16 @@ def valStep(dataLoader,
             c_feature, encoded_data, label = cpcModel(combined, label)
             c_feature = c_feature[:b, ...]
             encoded_data = encoded_data[b:, ...]
-            label =label[:b]
+            label = label[:b]
 
-            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label, spkr_emb)
-            if clustering is not None:
-                lossCluster = clustering(c_feature, label)
+            allLosses, allAcc = cpcCriterion(c_feature, encoded_data, label)
 
         if "locLoss_val" not in logs:
             logs["locLoss_val"] = np.zeros(allLosses.size(1))
             logs["locAcc_val"] = np.zeros(allLosses.size(1))
-            if clustering is not None:
-                logs["lossCluster_val"] = np.zeros(lossCluster.size(1))
 
         iter += 1
         logs["locLoss_val"] += allLosses.mean(dim=0).cpu().numpy()
-        if clustering is not None:
-            logs["lossCluster_val"] += (lossCluster.mean(dim=0)
-                                        ).detach().cpu().numpy()
         logs["locAcc_val"] += allAcc.mean(dim=0).cpu().numpy()
 
     logs = utils.update_logs(logs, iter)
@@ -343,7 +191,6 @@ def run(trainDataset,
         valDataset,
         batchSize,
         samplingMode,
-        balance_sampler,
         cpcModel,
         cpcCriterion,
         nEpoch,
@@ -351,10 +198,7 @@ def run(trainDataset,
         optimizer,
         scheduler,
         logs,
-        adversarial,
-        clustering,
         no_artefacts,
-        n_choose_amongst,
         batchSizePerGPU):
 
     print(f"Running {nEpoch} epochs")
@@ -363,73 +207,36 @@ def run(trainDataset,
     bestStateDict = None
     start_time = time.time()
 
-    if adversarial is not None:
-        optimAdv = torch.optim.Adam(list(adversarial.parameters()), lr=2e-4)
-
     for epoch in range(startEpoch, nEpoch):
 
         print(f"Starting epoch {epoch}")
         utils.cpu_stats()
 
-        if clustering is not None:
-            cpcModel.eval()
-            trainDataset.doubleLabels = False
-            clustering.module.updateCLusters(trainDataset.getDataLoader(batchSize, 'uniform',
-                                                                        True, numWorkers=0),
-                                             fl.FeatureModule(cpcModel.module, False))
-            if clustering.module.canRun():
-                for dataset, status in [(trainDataset, 'train'), (valDataset, 'val')]:
-                    phoneLabels, phoneFill = \
-                        buildNewPhoneDict(dataset.dbPath,
-                                          dataset.getSeqNames(),
-                                          cpcModel.module,
-                                          clustering.module.clusters,
-                                          clustering.module.k)
-                    dataset.resetPhoneLabels(phoneLabels, 160)
-                    fillingStatus = (phoneFill == 0).sum().item()
-                    print(
-                        f"{fillingStatus} clusters empty out of {clustering.module.k}")
-
         trainLoader = trainDataset.getDataLoader(batchSize, samplingMode,
                                                  True, numWorkers=0,
-                                                 balance_sampler=balance_sampler,
                                                  remove_artefacts=no_artefacts,
-                                                 n_choose_amongst=n_choose_amongst,
-                                                 batchSizePerGPU=batchSizePerGPU)
+                                                 batch_size_per_gpu=batchSizePerGPU)
 
         valLoader = valDataset.getDataLoader(batchSize, 'sequential', False,
-                                             numWorkers=0) if valDataset else []
+                                             numWorkers=0)
 
         print("Training dataset %d batches, Validation dataset %d batches, batch size %d" %
               (len(trainLoader), len(valLoader), batchSize))
 
-        if adversarial is not None:
-            locLogsTrain = adversarialTrainStep(trainLoader, cpcModel,
-                                                cpcCriterion,
-                                                optimizer, adversarial,
-                                                optimAdv, clustering,
-                                                logs["logging_step"])
-        else:
-            locLogsTrain = trainStep(
-                trainLoader, cpcModel, cpcCriterion, optimizer,
-                scheduler, clustering, logs["logging_step"])
+        locLogsTrain = trainStep(
+            trainLoader, cpcModel, cpcCriterion, optimizer,
+            scheduler, logs["logging_step"])
 
-        if valDataset:
-            locLogsVal = valStep(valLoader, cpcModel, cpcCriterion, clustering)
+        locLogsVal = valStep(valLoader, cpcModel, cpcCriterion)
 
         print(f'Ran {epoch + 1} epochs '
               f'in {time.time() - start_time:.2f} seconds')
 
-        if valDataset:
-            currentAccuracy = float(locLogsVal["locAcc_val"].mean())
-            if currentAccuracy > bestAcc:
-                bestStateDict = fl.get_module(cpcModel).state_dict()
-        else:
+        currentAccuracy = float(locLogsVal["locAcc_val"].mean())
+        if currentAccuracy > bestAcc:
             bestStateDict = fl.get_module(cpcModel).state_dict()
 
-        items = dict(locLogsTrain, **locLogsVal).items() if valDataset else locLogsTrain.items()
-
-        for key, value in items:
+        for key, value in dict(locLogsTrain, **locLogsVal).items():
             if key not in logs:
                 logs[key] = [None for x in range(epoch)]
             if isinstance(value, np.ndarray):
@@ -455,26 +262,31 @@ def main(argv):
 
     logs = {"epoch": [], "iter": [], "saveStep": args.save_step}
     logs["logging_step"] = args.logging_step
-    load_optimizer = False
+    loadOptimizer = False
 
     if args.pathCheckpoint is not None and not args.restart:
         cdata = fl.getCheckpointData(args.pathCheckpoint)
         if cdata is not None:
-            forbidden_attr = ["nGPU", "pathCheckpoint", "local_rank",
-                              "global_rank","node_id", "n_gpu_per_node"
-                              "debug", "restart", "world_size", "n_nodes"]
             data, logs, locArgs = cdata
             print(f"Checkpoint detected at {data}")
-            default_values = { k : v for k, v in vars(locArgs).items() \
-                           if k not in forbidden_attr}
-            args = parseArgs(argv, default_values)
-            args.load, load_optimizer = [data], True
+            fl.loadArgs(args, locArgs,
+                        forbiddenAttr={"nGPU", "pathCheckpoint",
+                                       "debug", "restart", "world_size",
+                                       "global_rank", "local_rank",
+                                       "n_nodes", "node_id", "n_gpu_per_node",
+                                       "max_size_loaded", "nEpoch", "save_step"})
+            args.load, loadOptimizer = [data], True
             args.loadCriterion = True
 
-    batchSize = args.nGPU * args.batchSizeGPU
+    logs["logging_step"] = args.logging_step
 
-    if args.speakerEmbedding is not None and not os.path.exists(args.speakerEmbedding):
-        raise ValueError("%s can't be found. Are you sure you provided the right location ?" % args.speakerEmbedding)
+    if args.nGPU == 0:
+        args.nGPU = 1
+
+    if args.signal_quality_path is not None and not os.path.exists(args.signal_quality_path):
+        raise ValueError("%s can't be found. Are you sure you provided the right location ?" % args.signal_quality_path)
+
+    batchSize = args.nGPU * args.batchSizeGPU
 
     if args.distributed:
         print('Distributed mode, moving to 1 process for data loading')
@@ -488,6 +300,7 @@ def main(argv):
     print('-' * 50)
 
     seqNames, speakers = findAllSeqs(args.pathDB,
+                                     no_speaker=args.no_speaker,
                                      extension=args.file_extension,
                                      loadCache=not args.ignore_cache,
                                      format=args.naming_convention,
@@ -499,18 +312,40 @@ def main(argv):
     if args.pathTrain is not None:
         seqTrain = filterSeqs(args.pathTrain, seqNames)
     else:
-        train_nb_files = int(args.train_prop*len(seqNames))
-        seqTrain = seqNames[0:train_nb_files]
+        seqTrain = seqNames
+
+    if len(seqTrain) == 0:
+        raise ValueError("No training sequences can be found. "
+                         "Please check that you provided the right path, "
+                         "and specified the right audio extension.")
 
     if args.pathVal is None:
+        import random
         print('No validation data specified!')
-        seqVal = seqNames[train_nb_files:]
+        if args.samplingType == "temporalsamespeaker":
+            # Shuffle by blocks so that we keep temporality
+            seqTrain_by_blocks = []
+            curr_seq_id = None
+            for seq_id, seq_path in seqTrain:
+                if curr_seq_id != seq_id:
+                    seqTrain_by_blocks.append([(seq_id, seq_path)])
+                    curr_seq_id = seq_id
+                else:
+                    seqTrain_by_blocks[-1].append((seq_id, seq_path))
+            random.shuffle(seqTrain_by_blocks)
+            seqTrain = [item for sublist in seqTrain_by_blocks for item in sublist]
+        else:
+            random.shuffle(seqTrain)
+
+        sizeTrain = int(0.95 * len(seqTrain))
+        seqTrain, seqVal = seqTrain[:sizeTrain], seqTrain[sizeTrain:]
+        print(f'Found files: {len(seqTrain)} train, {len(seqVal)} val')
     else:
         seqVal = filterSeqs(args.pathVal, seqNames)
 
     if args.debug:
-        seqTrain = seqTrain[:1000]
-        seqVal = seqVal[:1000]
+        seqTrain = seqTrain[-1000:]
+        seqVal = seqVal[-100:]
 
     phoneLabels, nPhones = None, None
     if args.supervised and args.pathPhone is not None:
@@ -524,9 +359,9 @@ def main(argv):
 
     if args.pathDBNoise is not None and (args.augment_past or args.augment_future):
         seqNoise, _ = findAllSeqs(args.pathDBNoise,
-                                   extension=args.noise_extension,
-                                   loadCache=not args.ignore_cache,
-                                   speaker_level=0)
+                                  extension=args.noise_extension,
+                                  loadCache=True,
+                                  speaker_level=0)
         if args.pathSeqNoise is not None:
             seqNoise = filterSeqs(args.pathSeqNoise, seqNoise)
         if args.debug:
@@ -534,15 +369,23 @@ def main(argv):
 
         print(f'\nLoading noise data at {args.pathDBNoise}')
         print("Loading the noise dataset")
-        noiseDataset = AudioBatchData(args.pathDBNoise, args.sizeWindow,
-                                       seqNoise, None, 1,
-                                       transform=PeakNorm(),
-                                       nProcessLoader=args.n_process_loader,
-                                       MAX_SIZE_LOADED=args.max_size_loaded)
-
+        noiseDataset = AudioBatchData(args.pathDBNoise,
+                                      args.sizeWindow,
+                                      seqNoise,
+                                      None,
+                                      1,
+                                      transform=PeakNorm(),
+                                      nProcessLoader=args.n_process_loader,
+                                      MAX_SIZE_LOADED=args.max_size_loaded,
+                                      augment_future=False,
+                                      augment_past=args.meta_aug,
+                                      augmentation=augmentation_factory(args, noiseDataset, applied_on_noise=True),
+                                      keep_temporality=args.naming_convention.startswith("id_spkr_onset_offset"),
+                                      past_equal_future=args.meta_aug
+                                      )
+    # to be checked
     if args.distributed:
         import random
-        random.Random(4).shuffle(seqTrain)
         def filter_distributed(files):
             start = len(files) * args.global_rank // args.world_size
             end = len(files) * (args.global_rank + 1) // args.world_size
@@ -557,7 +400,6 @@ def main(argv):
         print(
             f'Current worker files: {len(seqTrain)} train, {len(seqVal)} val')
 
-
     print(f'\nLoading audio data at {args.pathDB}')
     print("Loading the training dataset")
     trainDataset = AudioBatchData(args.pathDB,
@@ -570,9 +412,11 @@ def main(argv):
                                   augment_future=args.augment_future,
                                   augment_past=args.augment_past,
                                   augmentation=augmentation_factory(args, noiseDataset),
-                                  keep_temporality=args.naming_convention == "id_spkr_onset_offset",
-                                  speaker_embedding=args.speakerEmbedding,
-                                  speaker_embedding_step=args.speakerEmbeddingStep)
+                                  keep_temporality=args.samplingType == "temporalsamespeaker",
+                                  signal_quality_path=args.signal_quality_path,
+                                  signal_quality_step=args.signal_quality_step,
+                                  signal_quality_mode=args.signal_quality_mode,
+                                  past_equal_future=args.past_equal_future)
 
     print("Training dataset loaded\n")
 
@@ -583,9 +427,7 @@ def main(argv):
                                 seqVal,
                                 phoneLabels,
                                 len(speakers),
-                                nProcessLoader=args.n_process_loader,
-                                speaker_embedding=args.speakerEmbedding,
-                                speaker_embedding_step=args.speakerEmbeddingStep)
+                                nProcessLoader=args.n_process_loader)
         print("Validation dataset loaded")
         print("")
     else:
@@ -611,6 +453,7 @@ def main(argv):
     cpcModel.supervised = args.supervised
 
     # Training criterion
+    print(args)
     if args.load is not None and args.loadCriterion:
         cpcCriterion = loadCriterion(args.load[0], cpcModel.gEncoder.DOWNSAMPLING,
                                      len(speakers), nPhones)
@@ -618,7 +461,7 @@ def main(argv):
         cpcCriterion = getCriterion(args, cpcModel.gEncoder.DOWNSAMPLING,
                                     len(speakers), nPhones)
 
-    if load_optimizer:
+    if loadOptimizer:
         state_dict = torch.load(args.load[0], 'cpu')
         cpcCriterion.load_state_dict(state_dict["cpcCriterion"])
 
@@ -628,35 +471,19 @@ def main(argv):
     # Optimizer
     g_params = list(cpcCriterion.parameters()) + list(cpcModel.parameters())
 
-    clustering = None
-    if args.clustering is not None:
-        if args.clustering == 'deepClustering':
-            clustering = DeepClustering(args.n_clusters, args.hiddenGar,
-                                        args.cluster_delay,
-                                        args.cluster_iter,
-                                        args.clustering_update).cuda()
-            g_params += list(clustering.parameters())
-        elif args.clustering == 'deepEmbedded':
-            clustering = DeepEmbeddedClustering(args.learningRate,
-                                                args.n_clusters,
-                                                args.hiddenGar,
-                                                args.cluster_delay,
-                                                args.cluster_iter,
-                                                args.clustering_update).cuda()
-        elif args.clustering == 'CTCClustering':
-            clustering = CTCCLustering(args.n_clusters, args.hiddenGar,
-                                       args.cluster_delay,
-                                       args.cluster_iter,
-                                       args.clustering_update).cuda()
-        clustering = torch.nn.DataParallel(clustering,
-                                           device_ids=range(args.nGPU))
-
     lr = args.learningRate
-    optimizer = torch.optim.Adam(g_params, lr=lr,
-                                 betas=(args.beta1, args.beta2),
-                                 eps=args.epsilon)
+    if args.optimizer == 'adam':
+        print("Using Adam optimizer.")
+        optimizer = torch.optim.Adam(g_params, lr=lr,
+                                     betas=(args.beta1, args.beta2),
+                                     eps=args.epsilon)
+    elif args.optimizer == 'sgd':
+        print("Using SGD optimizer.")
+        optimizer = torch.optim.SGD(g_params, lr=lr, momentum=0.9)
+    else:
+        raise ValueError("Unsupported optimizer: %s" % args.optimizer)
 
-    if load_optimizer:
+    if loadOptimizer:
         print("Loading optimizer " + args.load[0])
         state_dict = torch.load(args.load[0], 'cpu')
         if "optimizer" in state_dict:
@@ -692,34 +519,23 @@ def main(argv):
         for i in range(len(logs["epoch"])):
             scheduler.step()
 
+    print('args.local_rank: ' + str(args.local_rank))
     if args.distributed:
         cpcModel = torch.nn.parallel.DistributedDataParallel(cpcModel, device_ids=[
-                                                             args.local_rank], output_device=args.local_rank, broadcast_buffers=True)
+            args.local_rank], output_device=args.local_rank, broadcast_buffers=True)
         cpcCriterion = torch.nn.parallel.DistributedDataParallel(cpcCriterion, device_ids=[
-                                                                 args.local_rank], output_device=args.local_rank, broadcast_buffers=True)
+            args.local_rank], output_device=args.local_rank, broadcast_buffers=True)
     else:
         cpcModel = torch.nn.DataParallel(cpcModel,
                                          device_ids=range(args.nGPU)).cuda()
         cpcCriterion = torch.nn.DataParallel(cpcCriterion,
                                              device_ids=range(args.nGPU)).cuda()
 
-    adversarial = None
-    if args.adversarial:
-        adversarial = cr.AdvSpeakerCriterion(args.hiddenGar,
-                                             len(speakers), args.onEncoder)
-        adversarial = torch.nn.DataParallel(adversarial,
-                                            device_ids=range(args.nGPU))
-        adversarial.cuda()
 
-    balance_sampler = None
-    if args.balance_type is not None:
-        balance_sampler = get_balance_sampler(args.balance_type,
-                                             balance_coeff=args.balance_coeff)
     run(trainDataset,
         valDataset,
         batchSize,
         args.samplingType,
-        balance_sampler,
         cpcModel,
         cpcCriterion,
         args.nEpoch,
@@ -727,14 +543,11 @@ def main(argv):
         optimizer,
         scheduler,
         logs,
-        adversarial,
-        clustering,
         args.no_artefacts,
-        args.n_choose_amongst,
         args.batchSizeGPU)
 
 
-def parseArgs(argv, defaults=None):
+def parseArgs(argv):
     # Run parameters
     parser = argparse.ArgumentParser(description='Trainer')
 
@@ -764,9 +577,6 @@ def parseArgs(argv, defaults=None):
     group_db.add_argument('--max_size_loaded', type=int, default=4000000000,
                           help='Maximal amount of data (in byte) a dataset '
                           'can hold in memory at any given time')
-    group_db.add_argument('--balance_type', type=str, default=None,
-                         choices=['linear', 'log', 'pow'])
-    group_db.add_argument('--balance_coeff', type=float, default=0.5)
     group_supervised = parser.add_argument_group(
         'Supervised mode (depreciated)')
     group_supervised.add_argument('--supervised', action='store_true',
@@ -819,8 +629,7 @@ def parseArgs(argv, defaults=None):
                                  help="Multi-GPU - Local rank")
     group_distrubed.add_argument("--master_port", type=int, default=-1,
                                  help="Master port (for multi-node SLURM jobs)")
-    if defaults is not None:
-        parser.set_defaults(**defaults)
+
     args = parser.parse_args(argv)
 
     if args.pathDB is None and (args.pathCheckpoint is None or args.restart):
@@ -835,20 +644,21 @@ def parseArgs(argv, defaults=None):
                          "This is because temporality must be kept (sequences are loaded in temporal order), and splitting "
                          "the utterances might break the temporality.")
 
-    if args.samplingType == "temporalsamespeaker" and not args.ignore_cache:
-        raise ValueError("If you want to use temporalsamespeaker sampling type, you must set ignore_cache to True "
-                         "as this mode is not compatible with other sampling methods")
-
     if args.samplingType == "temporalsamespeaker" and \
-            (args.naming_convention != "id_spkr_onset_offset" and args.naming_convention != "spkr-id"):
+            args.naming_convention not in ['id_spkr_onset_offset', 'id_spkr_onset_offset_spkr_onset_offset', 'spkr-id',
+                                           'spkr_id_nb', 'spkr-id-nb', 'no_speaker', 'full_seedlings']:
         raise ValueError("If you want to use temporalsamespeaker sampling type, you must set naming_convention "
-                         "to id_spkr_onset_offset (daylong recordings) or spkr-id (librispeech) "
+                         "to id_spkr_onset_offset (daylong recordings) or spkr-id (librispeech) or spkr_id_nb (inftrain)"
                          "as we need to sort the files temporally.")
 
-    if (args.speakerEmbedding is not None) and (not args.concatenate_spkr_emb) and (args.n_choose_amongst is None):
-        raise ValueError("You want to load speaker embeddings but neither args.concatenate_spkr_emb or "
-                         "args.n_choose_amongst has been set. The speaker embeddings will be of no use."
-                         "Please deactivate this parameter.")
+    #if args.samplingType == "temporalsamespeaker":
+    #    args.ignore_cache = True
+
+    if not args.meta_aug and (args.meta_aug_type is not None or args.meta_aug_type == "none"):
+        raise ValueError("You specified parameters --meta_aug_type without having activated --meta_aug flag.")
+
+    if args.meta_aug and args.meta_aug_type is None or args.meta_aug_type == "none":
+        raise ValueError("You specified flag --meta_aug, but you haven't specified meta_aug_type")
 
     if args.pathCheckpoint is not None:
         args.pathCheckpoint = os.path.abspath(args.pathCheckpoint)
@@ -870,6 +680,7 @@ def parseArgs(argv, defaults=None):
     if args.arMode == 'no_ar':
         args.hiddenGar = args.hiddenEncoder
     return args
+
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn')

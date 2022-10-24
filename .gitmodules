@@ -1,0 +1,6 @@
+[submodule "torch-audiomentations"]
+	path = torch-audiomentations
+	url = https://github.com/asteroid-team/torch-audiomentations
+[submodule "WavAugment"]
+	path = WavAugment
+	url = https://github.com/facebookresearch/WavAugment

@@ -24,7 +24,7 @@ def normalize_with_singularity(x):
                               dtype=x.dtype,
                               device=x.device) + 1e-12
     border_vect[zero_vals] = -2*1e12
-    return  torch.cat([x, border_vect], dim=2)
+    return torch.cat([x, border_vect], dim=2)
 
 
 def load_item_file(path_item_file):

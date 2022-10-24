@@ -2,26 +2,23 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import functools
 import os
-import math
 import random
 import time
-import tqdm
-import torch
-import statistics
-import numpy as np
-from pathlib import Path
 from copy import deepcopy
-from functools import partial
-from torch.multiprocessing import Pool
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.data.dataloader import _SingleProcessDataLoaderIter
-from torch.utils.data.sampler import Sampler, BatchSampler
-from scipy.spatial.distance import cdist
-
+from pathlib import Path
+import csv
+import numpy as np
+import torch
 import torch.nn as nn
 import torchaudio
+import functools
 
+import tqdm
+from torch.multiprocessing import Pool
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.sampler import Sampler, BatchSampler
 
 class AudioBatchData(Dataset):
 
@@ -38,8 +35,10 @@ class AudioBatchData(Dataset):
                  augment_future=False,
                  augmentation=None,
                  keep_temporality=True,
-                 speaker_embedding=None,
-                 speaker_embedding_step=0.01):
+                 past_equal_future=False,
+                 signal_quality_path=None,
+                 signal_quality_step=1600,
+                 signal_quality_mode=None):
         """
         Args:
             - path (string): path to the training dataset
@@ -57,45 +56,69 @@ class AudioBatchData(Dataset):
            - MAX_SIZE_LOADED (int): target maximal size of the floating array
                                     containing all loaded data.
         """
+        # Data parameters
         self.MAX_SIZE_LOADED = MAX_SIZE_LOADED
         self.nProcessLoader = nProcessLoader
         self.dbPath = Path(path)
         self.sizeWindow = sizeWindow
         self.seqNames = [(s, self.dbPath / x) for s, x in seqNames]
-        if speaker_embedding is not None:
-            self.speaker_embedding = Path(speaker_embedding)
-            self.spkrEmbNames = [self.speaker_embedding / x.replace('.wav', '.npy') for s, x in seqNames]
-        else:
-            self.speaker_embedding = None
-            self.spkrEmbNames = [None]*len(self.seqNames)
-
         self.reload_pool = Pool(nProcessLoader)
         self.transform = transform
         self.keep_temporality = keep_temporality
 
+        # Signal quality parameters
+        self.signal_quality_path = Path(signal_quality_path) if signal_quality_path is not None else None
+        self.signal_quality_step = signal_quality_step
+            # Number of signal quality estimations in one input sequence of 1.28 sec
+        self.signal_quality_size = self.sizeWindow // self.signal_quality_step
+        self.signal_quality_mode = signal_quality_mode
+
+        if self.signal_quality_path is not None:
+            self.init_min_max_signal_quality()
+
+
+        # Data augmentation parameters
+        self.augment_past = augment_past
+        self.augment_future = augment_future
+        self.augmentation = augmentation
+        self.past_equal_future = past_equal_future
+        if self.past_equal_future and not self.augment_past:
+            raise ValueError("Can only apply the same transformation on past and future sequences,"
+                             "when past sequence is augmented. Here --augment_past = False")
+
+        # Initialize data loading
+        self.doubleLabels = False
+
         self.prepare()
         self.speakers = list(range(nSpeakers))
         self.data = []
-        self.dataSpkr = []
+        self.data_quality = []
 
         self.phoneSize = 0 if phoneLabelsDict is None else \
             phoneLabelsDict["step"]
         self.phoneStep = 0 if phoneLabelsDict is None else \
             self.sizeWindow // self.phoneSize
 
-        # Size of the speaker rep in number of frames
-        self.spkrEmbeddingSize = speaker_embedding_step
-        # Number of speaker embeddings in 1 window
-        self.spkrEmbeddingStep = self.sizeWindow // self.spkrEmbeddingSize
-
         self.phoneLabelsDict = deepcopy(phoneLabelsDict)
         self.loadNextPack(first=True)
         self.loadNextPack()
-        self.doubleLabels = False
 
-        self.augment_past = augment_past
-        self.augment_future = augment_future
-        self.augmentation = augmentation
+    def init_min_max_signal_quality(self):
+        file_path = self.signal_quality_path / 'min_max.csv'
+        if not file_path.is_file():
+            raise FileNotFoundError('Can not find file containing min/max values of snr and c50 under: %s' % (
+                    self.signal_quality_path / 'min_max.csv'))
+        with open(file_path, 'r') as fin:
+            reader = csv.reader(fin)
+            keys = next(reader)
+            values = next(reader)
+            data = {k: v for k, v in zip(keys, values)}
+            try:
+                self.min_snr, self.max_snr = float(data['min_snr']), float(data['max_snr'])
+                self.min_c50, self.max_c50 = float(data['min_c50']), float(data['max_c50'])
+            except:
+                raise ValueError("min_max.csv should contain the following keys: min_snr, max_snr, min_c50, max_c50.")
+
 
     def resetPhoneLabels(self, newPhoneLabels, step):
         self.phoneSize = step
@@ -139,10 +162,10 @@ class AudioBatchData(Dataset):
             # We shuffle sequences in random order
             random.shuffle(self.seqNames)
 
-        # Let's not forget to keep seqNames and spkrEmbNames aligned
-        if self.speaker_embedding is not None:
-            self.spkrEmbNames = [self.speaker_embedding / os.path.relpath(x, self.dbPath).replace('.wav', '.npy') for s,x in self.seqNames]
-
+        # Let's not forget to keep seqNames and signal_quality_names aligned
+        if self.signal_quality_path is not None:
+            self.signal_quality_names = [self.signal_quality_path / os.path.relpath(x, self.dbPath).replace('.wav', '.pt')
+                                         for s, x in self.seqNames]
         start_time = time.time()
 
         print("Checking length...")
@@ -171,7 +194,7 @@ class AudioBatchData(Dataset):
     def getNPacks(self):
         return len(self.packageIndex)
 
-    def loadNextPack(self, first=False, only_spkr_emb=False):
+    def loadNextPack(self, first=False):
         self.clear()
         if not first:
             self.currentPack = self.nextPack
@@ -182,17 +205,19 @@ class AudioBatchData(Dataset):
             self.nextData = self.r.get()
             self.parseNextDataBlock()
             del self.nextData
+
         self.nextPack = (self.currentPack + 1) % len(self.packageIndex)
         seqStart, seqEnd = self.packageIndex[self.nextPack]
 
         if self.nextPack == 0 and len(self.packageIndex) > 1:
             self.prepare()
 
-        self.r = self.reload_pool.map_async(loadFile,
-                                            zip(
-                                                self.seqNames[seqStart:seqEnd],
-                                                self.spkrEmbNames[seqStart:seqEnd]
-                                            ))
+        if self.signal_quality_path is not None:
+            partial_loadFile = functools.partial(loadFile, signal_quality_step=self.signal_quality_step)
+            self.r = self.reload_pool.map_async(partial_loadFile, zip(self.seqNames[seqStart:seqEnd],
+                                                                      self.signal_quality_names[seqStart:seqEnd]))
+        else:
+            self.r = self.reload_pool.map_async(loadFile, self.seqNames[seqStart:seqEnd])
 
     def parseNextDataBlock(self):
         # Labels
@@ -205,9 +230,9 @@ class AudioBatchData(Dataset):
         # To accelerate the process a bit
         self.nextData.sort(key=lambda x: (x[0], x[1]))
         tmpData = []
-        tmpDataSpkr = []
+        tmpDataQuality = []
 
-        for speaker, seqName, seq, spkr_emb in self.nextData:
+        for speaker, seqName, seq, *signal_quality in self.nextData:
             while self.speakers[indexSpeaker] < speaker:
                 indexSpeaker += 1
                 self.speakerLabel.append(speakerSize)
@@ -218,26 +243,42 @@ class AudioBatchData(Dataset):
                 self.phoneLabels += self.phoneLabelsDict[seqName]
                 newSize = len(self.phoneLabelsDict[seqName]) * self.phoneSize
                 seq = seq[:newSize]
-
             sizeSeq = seq.size(0)
             tmpData.append(seq)
-            tmpDataSpkr.append(spkr_emb)
+            if len(signal_quality) != 0:
+                tmpDataQuality.append(signal_quality[0])
             self.seqLabel.append(self.seqLabel[-1] + sizeSeq)
             speakerSize += sizeSeq
             del seq
-            del spkr_emb
+            del signal_quality
 
         self.speakerLabel.append(speakerSize)
         self.data = torch.cat(tmpData, dim=0)
-        self.dataSpkr = torch.cat(tmpDataSpkr, dim=0)
+        if len(tmpDataQuality) != 0:
+            self.data_quality = torch.cat(tmpDataQuality, dim=0)
+            # Normalize scores
+            self.data_quality[:, 0] = (self.data_quality[:, 0] - self.min_snr) / (self.max_snr - self.min_snr)
+            self.data_quality[:, 1] = (self.data_quality[:, 1] - self.min_c50) / (self.max_c50 - self.min_c50)
+
+            # Add average of snr and C50 as a column
+            self.data_quality = torch.cat((self.data_quality,
+                                           torch.mean(self.data_quality, dim=1).view(-1, 1)), dim=1)
 
     def getPhonem(self, idx):
         idPhone = idx // self.phoneSize
         return self.phoneLabels[idPhone:(idPhone + self.phoneStep)]
 
-    def getSpkrEmb(self, idx):
-        spkrEmb = idx // self.spkrEmbeddingSize
-        return self.dataSpkr[spkrEmb:(spkrEmb + self.spkrEmbeddingStep)]
+    def getSignalQuality(self, idx):
+        idxQuality = idx // self.signal_quality_step
+        estimated_signal_quality = self.data_quality[idxQuality:(idxQuality + self.signal_quality_size)]
+        if self.signal_quality_mode == 'snr':
+            return estimated_signal_quality[:, 0]
+        elif self.signal_quality_mode == 'c50':
+            return estimated_signal_quality[:, 1]
+        elif self.signal_quality_mode == 'snr_c50':
+            return estimated_signal_quality[:, 2]
+        else:
+            raise ValueError("--signal_quality_mode should be in ['snr', 'c50', 'snr_c50'].")
 
     def getSpeakerLabel(self, idx):
         idSpeaker = next(x[0] for x in enumerate(
@@ -250,9 +291,9 @@ class AudioBatchData(Dataset):
     def __getitem__(self, idx):
         if idx < 0 or idx >= len(self.data) - self.sizeWindow - 1:
             print(idx)
-        outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
-        outDataSpkrEmb = self.getSpkrEmb(idx)
+            print("upper bound %d" % (len(self.data) - self.sizeWindow - 1))
 
+        outData = self.data[idx:(self.sizeWindow + idx)].view(1, -1)
         label = torch.tensor(self.getSpeakerLabel(idx), dtype=torch.long)
         if self.phoneSize > 0:
             label_phone = torch.tensor(self.getPhonem(idx), dtype=torch.long)
@@ -265,18 +306,28 @@ class AudioBatchData(Dataset):
             outData = self.transform(outData)
 
         x1, x2 = outData, outData
+        # Past augmentation only
         if self.augment_past and self.augmentation:
             x1 = self.augmentation(x1)
-        if self.augment_future and self.augmentation:
+
+        # And/or future augmentation
+        if not self.past_equal_future and self.augment_future and self.augmentation:
             x2 = self.augmentation(x2)
+        # If past_equal_future is activated, apply the same transformation to past and future
+        if self.past_equal_future:
+            x2 = x1
 
         x1, x2 = x1.unsqueeze(0), x2.unsqueeze(0)
         outData = torch.cat([x1, x2], dim=0)
 
+        res = outData, label
         if self.doubleLabels:
-            return outData, label, label_phone, outDataSpkrEmb
+            res = res + (label_phone, )
 
-        return outData, label, outDataSpkrEmb
+        if self.signal_quality_path:
+            outDataSignalQuality = self.getSignalQuality(idx)
+            res = res + (outDataSignalQuality,)
+        return res
 
     def getNSpeakers(self):
         return len(self.speakers)
@@ -287,25 +338,19 @@ class AudioBatchData(Dataset):
     def getNLoadsPerEpoch(self):
         return len(self.packageIndex)
 
-    def getBaseSampler(self, type, batchSize, offset, balance_sampler=None,
-                       n_choose_amongst=None,
-                       batchSizePerGPU=None):
+    def getBaseSampler(self, type, batchSize,
+                       offset, batchSizePerGPU=None):
+
         if type == "samespeaker":
             return SameSpeakerSampler(batchSize, self.speakerLabel,
-                                      self.sizeWindow, offset,
-                                      balance_sampler=balance_sampler,
-                                      n_choose_amongst=n_choose_amongst)
+                                      self.sizeWindow, offset)
         if type == "samesequence":
             return SameSpeakerSampler(batchSize, self.seqLabel,
-                                      self.sizeWindow, offset,
-                                      balance_sampler=balance_sampler,
-                                      n_choose_amongst=n_choose_amongst)
+                                      self.sizeWindow, offset)
         if type == "temporalsamespeaker":
             return TemporalSameSpeakerSampler(batchSize,
                                               self.speakerLabel,
                                               self.sizeWindow, offset,
-                                              balance_sampler=balance_sampler,
-                                              n_choose_amongst=n_choose_amongst,
                                               batchSizePerGPU=batchSizePerGPU)
         if type == "sequential":
             return SequentialSampler(len(self.data), self.sizeWindow,
@@ -319,8 +364,7 @@ class AudioBatchData(Dataset):
         raise ValueError("--samplingType should belong to %s" % ["samespeaker", "samesequence", "temporalsamespeaker", "sequential", "uniform"])
 
     def getDataLoader(self, batchSize, type, randomOffset, numWorkers=0,
-                      onLoop=-1, nLoops = -1, balance_sampler=None, remove_artefacts=False,
-                      n_choose_amongst=None, batchSizePerGPU=None):
+                      onLoop=-1, nLoops = -1, remove_artefacts=False, batch_size_per_gpu=None):
         r"""
         Get a batch sampler for the current dataset.
         Args:
@@ -332,22 +376,20 @@ class AudioBatchData(Dataset):
                 type == "speaker": grouped sampler speaker-wise
                 type == "sequence": grouped sampler sequence-wise
                 type == "sequential": sequential sampling
+                type == "temporalsamespeaker": temporal same speaker sampling
                 else: uniform random sampling of the full audio
                 vector
             - randomOffset (bool): if True add a random offset to the sampler
                                    at the begining of each iteration
             - remove_artefacts : if True, will shift sequences so that no artefact
                                 is created (if temporal_sampling is activated)
-            - n_choose_amongst : if not None, will load n_choose_amongst sequences (only their speaker
-                        embeddings) and will only build the batch with the batchSize
-                        closest sequences.
         """
         totSize = self.totSize // (self.sizeWindow * batchSize)
         if onLoop >= 0:
             self.currentPack = onLoop - 1
             self.loadNextPack()
-            nLoops = 1 if nLoops <=0 else nLoops
-        elif nLoops <= 0 :
+            nLoops = 1 if nLoops <= 0 else nLoops
+        elif nLoops <= 0:
             nLoops = len(self.packageIndex)
 
         def samplerCall():
@@ -360,31 +402,33 @@ class AudioBatchData(Dataset):
                     offset = random.randint(0, self.sizeWindow // 2)
             else:
                 offset = 0
-            return self.getBaseSampler(type, batchSize, offset, balance_sampler, n_choose_amongst,
-                                       batchSizePerGPU=batchSizePerGPU)
+            return self.getBaseSampler(type, batchSize, offset, batch_size_per_gpu)
 
         return AudioLoader(self, samplerCall, nLoops, self.loadNextPack,
-                           totSize, numWorkers, remove_artefacts, n_choose_amongst)
+                           totSize, numWorkers, remove_artefacts)
 
 
-def loadFile(data):
-    # Load metadata
-    seq_info, spkr_emb_path = data
+def loadFile(data, signal_quality_step=None):
+    info1, info2 = data
+
+    if isinstance(info1, int):
+        # without signal quality estimations
+        seq_info = info1, info2
+        signal_quality_path = None
+    else:
+        seq_info, signal_quality_path = info1, info2
+
     speaker, fullPath = seq_info
     seqName = fullPath.stem
 
     # Load audio
-    seq = torchaudio.load(fullPath)[0].mean(dim=0)
-    # Load speaker embedding
-    if spkr_emb_path is not None:
-        spkr_emb = torch.from_numpy(np.load(spkr_emb_path))
-        # Ugly padding to ensure spkr_emb is not too short
-        if spkr_emb.shape[0] * 160 < seq.shape[0]:
-            spkr_emb = torch.nn.functional.pad(spkr_emb, (0, 0, 1, 1))
-    else:
-        spkr_emb = torch.empty(0)
-    return speaker, seqName, seq, spkr_emb
-
+    seq = torchaudio.load(str(fullPath))[0].mean(dim=0)
+    # Load signal quality estimations
+    if signal_quality_path is not None:
+        signal_quality = torch.cat(torch.load(signal_quality_path), dim=1)
+        seq = seq[:signal_quality.shape[0]*signal_quality_step]
+        return speaker, seqName, seq, signal_quality
+    return speaker, seqName, seq
 
 class PeakNorm(object):
 
@@ -392,18 +436,6 @@ class PeakNorm(object):
         #Input Size: C x L
         max_val = x.abs().max(dim=1, keepdim=True)[0]
         return x / (max_val + 1e-8)
-
-
-class ComposeTransform(object):
-
-    def __init__(self, list_transform):
-        self.list_transform = deepcopy(list_transform)
-
-    def __call__(self, x):
-        for t in self.list_transform:
-            x = t(x)
-        return x
-
 
 class AudioLoader(object):
     r"""
@@ -419,8 +451,7 @@ class AudioLoader(object):
                  updateCall,
                  size,
                  numWorkers,
-                 remove_artefacts = False,
-                 n_choose_amongst=None):
+                 remove_artefacts=False):
         r"""
         Args:
             - dataset (AudioBatchData): target dataset
@@ -437,7 +468,6 @@ class AudioLoader(object):
         self.dataset = dataset
         self.numWorkers = numWorkers
         self.remove_artefacts = remove_artefacts
-        self.n_choose_amongst = n_choose_amongst
 
     def __len__(self):
         return self.size
@@ -448,10 +478,6 @@ class AudioLoader(object):
         # Remove artefacts
         if self.remove_artefacts:
             sampler = self.__remove_artefacts(sampler)
-
-        # Choose n closest sequences
-        if self.n_choose_amongst is not None:
-            sampler = self.__n_closest_speaker_embeddings(sampler)
 
         return DataLoader(self.dataset,
                           batch_sampler=sampler,
@@ -477,38 +503,26 @@ class AudioLoader(object):
             offset = 0
             for beg_seq in batch:
                 beg_seq += offset
+                delete_batch = False
+                # Loop through the sequences' name
                 for i in range(1, len(seqLabels)):
+                    # if there's an artifact
                     if seqLabels[i-1] <= beg_seq < seqLabels[i]:
                         if beg_seq + windowSize > seqLabels[i]:
-                            new_batch.append(seqLabels[i])
+                            if i != len(seqLabels)-1:
+                                new_batch.append(seqLabels[i])
+                            else:
+                                print("warning, deleting batch because artifact "
+                                      "cannot be removed without going out of bounds")
+                                delete_batch = True
                             if isinstance(sampler, TemporalSameSpeakerSampler):
                                 offset += seqLabels[i] - beg_seq
                         else:
                             new_batch.append(beg_seq)
-            if isinstance(sampler, TemporalSameSpeakerSampler) and new_batch[-1] > self.dataset.seqLabel[-1]:
-                # We make sure that we don't go out of range
-                print("out of range")
-                new_batch[-1] = self.dataset.seqLabel[-1]-windowSize
-            new_batches.append(new_batch)
+
+            if not delete_batch:
+                new_batches.append(new_batch)
         sampler.batches = new_batches
-        return sampler
-
-    def __n_closest_speaker_embeddings(self, sampler):
-        # load speaker embedding for every batch
-        # Number of speaker embeddings = number_of_batch * n_choose_amongst
-        # in total, we have n_batch * n_choose_amongst * spkr_emb_nb_feat
-        speaker_embeddings = torch.stack([torch.stack([self.dataset.getSpkrEmb(idx).mean(dim=0) for idx in batch])
-                                          for batch in sampler.batches])
-
-        cos = nn.CosineSimilarity()
-        for i, spkr_emb_batch in enumerate(speaker_embeddings):
-            seq0 = spkr_emb_batch[0].view(1, -1)
-            sim0all = cos(seq0, spkr_emb_batch)
-
-            # Extract sequences that have the highest cosine similarity
-            max_indices = sorted(torch.topk(sim0all, sampler.effectiveBatchSize).indices)
-            sampler.batches[i] = [sampler.batches[i][idx] for idx in max_indices]
-
         return sampler
 
     def __iter__(self):
@@ -518,26 +532,6 @@ class AudioLoader(object):
                 yield x
             if i < self.nLoop - 1:
                 self.updateCall()
-
-    def __n_closest_speaker_embeddings_verbose(self, sampler):
-        # load speaker embedding for every batch
-        # Number of speaker embeddings = number_of_batch * n_choose_amongst
-        # in total, we have n_batch * n_choose_amongst * spkr_emb_nb_feat
-        speaker_embeddings = torch.stack([torch.stack([self.dataset.getSpkrEmb(idx).mean(dim=0) for idx in batch])
-                                          for batch in sampler.batches])
-
-        cos = nn.CosineSimilarity()
-        cosine_similarities = []
-        for i, spkr_emb_batch in enumerate(speaker_embeddings):
-            seq0 = spkr_emb_batch[0].view(1,-1)
-            sim0all = cos(seq0, spkr_emb_batch)
-
-            # Extract sequences that have the highest cosine similarity
-            max_indices = sorted(torch.topk(sim0all, sampler.effectiveBatchSize).indices)
-            sampler.batches[i] = [sampler.batches[i][idx] for idx in max_indices]
-            cosine_similarities.append(sim0all)
-
-        return sampler, cosine_similarities
 
     # Debug functions
     def get_data_loader_verbose(self):
@@ -562,12 +556,6 @@ class AudioLoader(object):
         if self.remove_artefacts:
             sampler = self.__remove_artefacts(sampler)
 
-        cosine_distances = [None] * len(sampler.batches)
-        # Choose n closest sequences
-        if self.n_choose_amongst is not None:
-            sampler, cosine_distances = self.__n_closest_speaker_embeddings_verbose(sampler)
-
-
         seqLabels = self.dataset.seqLabel
         seqNames = self.dataset.getSeqNames()
         windowSize = self.dataset.sizeWindow
@@ -590,7 +578,7 @@ class AudioLoader(object):
 
         return DataLoader(self.dataset,
                           batch_sampler=sampler,
-                          num_workers=self.numWorkers), sampler_names, sampler_artefacts, cosine_distances
+                          num_workers=self.numWorkers), sampler_names, sampler_artefacts
 
     def iter_verbose(self):
         """
@@ -604,9 +592,9 @@ class AudioLoader(object):
         Should only be used for debug purposes
         """
         for i in range(self.nLoop):
-            dataloader, sampler_names, sampler_artefacts, cosine_distance = self.get_data_loader_verbose()
+            dataloader, sampler_names, sampler_artefacts = self.get_data_loader_verbose()
             for i, x in enumerate(dataloader):
-                yield x, sampler_names[i], sampler_artefacts[i], cosine_distance[i]
+                yield x, sampler_names[i], sampler_artefacts[i]
 
             if i < self.nLoop - 1:
                 self.updateCall()
@@ -664,28 +652,18 @@ class TemporalSameSpeakerSampler(Sampler):
                  samplingIntervals,
                  sizeWindow,
                  offset,
-                 balance_sampler=None,
-                 n_choose_amongst=None,
                  batchSizePerGPU=None):
         self.samplingIntervals = samplingIntervals
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
-        self.batchSizePerGPU = batchSizePerGPU
         self.offset = offset
-        self.balance_sampler = balance_sampler
-        self.n_choose_amongst = n_choose_amongst
-
-        if self.n_choose_amongst is not None:
-            self.effectiveBatchSize = self.batchSize
-            self.batchSize = self.n_choose_amongst
-            print("Will compute the %d closest sequences amongst %d sequences in total.\n"
-                  "Distances will be computed in terms of cosine "
-                  "similarities between speaker embeddings." % (self.effectiveBatchSize, self.batchSize))
+        self.batchSizePerGPU = batchSizePerGPU
 
         if self.samplingIntervals[0] != 0:
             raise AttributeError("Sampling intervals should start at zero")
 
         nWindows = len(self.samplingIntervals) - 1
+
         # One batch will be of size : self.sizeWindow * self.batchSize
         # And one batch will be made of consecutive chunks of audios
         self.sizeSamplers = [(self.samplingIntervals[i+1] -
@@ -710,19 +688,14 @@ class TemporalSameSpeakerSampler(Sampler):
         return range(beg, beg + self.sizeWindow * self.batchSize, self.sizeWindow)
 
     def __iter__(self):
-        if self.balance_sampler is not None:
-            self.build_batches()
         random.shuffle(self.batches)
         return iter(self.batches)
 
     def build_batches(self):
-        if self.balance_sampler is not None:
-            order = self.get_balanced_sampling()
-        else:
-            order = [(x, torch.randperm(val).tolist())
-                     for x, val in enumerate(self.sizeSamplers) if val > 0]
+        order = [(x, torch.randperm(val).tolist())
+                 for x, val in enumerate(self.sizeSamplers) if val > 0]
 
-        # Build Batches
+        # Build batches (or minibatches depending on the config)
         self.batches = []
         for indexSampler, randperm in order:
             indexStart, sizeSampler = 0, len(randperm)
@@ -733,50 +706,18 @@ class TemporalSameSpeakerSampler(Sampler):
                     self.batches.append(locBatch)
                 indexStart = indexEnd
 
-    def get_balanced_sampling(self):
-        # untested
-        target_weights = self.balance_sampler(self.sizeSamplers)
-        order = []
-        for x, val in enumerate(self.sizeSamplers):
-            if val <= 0:
-                continue
-            to_take = target_weights[x] #int(target_val *self.balance_coeff + (1-self.balance_coeff) * val)
-            took = 0
-            speaker_batch = []
-            while took < to_take:
-                remainer = to_take - took
-                batch = torch.randperm(val).tolist()
-                if remainer < val:
-                    batch = batch[:remainer]
-                took+= len(batch)
-                speaker_batch+= batch
-            order.append((x,speaker_batch))
-        return order
-
-
 class SameSpeakerSampler(Sampler):
 
     def __init__(self,
                  batchSize,
                  samplingIntervals,
                  sizeWindow,
-                 offset,
-                 balance_sampler=None,
-                 n_choose_amongst=None):
+                 offset):
 
         self.samplingIntervals = samplingIntervals
         self.sizeWindow = sizeWindow
         self.batchSize = batchSize
         self.offset = offset
-        self.balance_sampler = balance_sampler
-        self.n_choose_amongst = n_choose_amongst
-
-        if self.n_choose_amongst is not None:
-            self.effectiveBatchSize = self.batchSize
-            self.batchSize = self.n_choose_amongst
-            print("Will compute the %d closest sequences amongst %d sequences in total.\n"
-                  "Distances will be computed in terms of cosine "
-                  "similarities between speaker embeddings." % (self.effectiveBatchSize, self.batchSize))
 
         if self.samplingIntervals[0] != 0:
             raise AttributeError("Sampling intervals should start at zero")
@@ -797,22 +738,17 @@ class SameSpeakerSampler(Sampler):
             + self.samplingIntervals[iInterval]
 
     def __iter__(self):
-        if self.balance_sampler is not None:
-            self.build_batches()
         random.shuffle(self.batches)
         return iter(self.batches)
 
     def build_batches(self):
-        if self.balance_sampler is not None:
-            order = self.get_balanced_sampling()
-        else:
-            order = [(x, torch.randperm(val).tolist())
-                     for x, val in enumerate(self.sizeSamplers) if val > 0]
+        order = [(x, torch.randperm(val).tolist())
+                 for x, val in enumerate(self.sizeSamplers) if val > 0]
 
         # Build Batches
         self.batches = []
         for indexSampler, randperm in order:
-            indexStart, sizeSampler = 0, len(randperm) #self.sizeSamplers[indexSampler]
+            indexStart, sizeSampler = 0, len(randperm)
             while indexStart < sizeSampler:
                 indexEnd = min(sizeSampler, indexStart + self.batchSize)
                 locBatch = [self.getIndex(x, indexSampler)
@@ -820,34 +756,20 @@ class SameSpeakerSampler(Sampler):
                 indexStart = indexEnd
                 self.batches.append(locBatch)
 
-    def get_balanced_sampling(self):
-
-        target_weights = self.balance_sampler(self.sizeSamplers)
-        order = []
-        for x, val in enumerate(self.sizeSamplers):
-            if val <= 0:
-                continue
-            to_take = target_weights[x] #int(target_val *self.balance_coeff + (1-self.balance_coeff) * val)
-            took = 0
-            speaker_batch = []
-            while took < to_take:
-                remainer = to_take - took
-                batch = torch.randperm(val).tolist()
-                if remainer < val:
-                    batch = batch[:remainer]
-                took+= len(batch)
-                speaker_batch+= batch
-            order.append((x,speaker_batch))
-        return order
-
 
 def extractLength(couple):
     speaker, locPath = couple
-    info = torchaudio.info(str(locPath))[0]
-    return info.length
+    try:
+        info = torchaudio.info(str(locPath))
+        dur = info.num_frames
+    except:
+        info = torchaudio.info(str(locPath))[0]
+        dur = info.length
+    return dur
 
 
 def findAllSeqs(dirName,
+                no_speaker=False,
                 extension='.flac',
                 loadCache=False,
                 speaker_level=1,
@@ -908,7 +830,7 @@ def findAllSeqs(dirName,
     outIds = []
     idsTarget= {}
 
-    for root, dirs, filenames in tqdm.tqdm(os.walk(dirName)):
+    for root, dirs, filenames in tqdm.tqdm(os.walk(dirName, followlinks=True)):
         filtered_files = [f for f in filenames if f.endswith(extension)]
 
         if len(filtered_files) > 0:
@@ -922,11 +844,28 @@ def findAllSeqs(dirName,
                 full_path = os.path.join(root[prefixSize:], filename)
                 outSequences.append((speaker, full_path))
                 if format is not None:
+                    # Really need to factor that with a single parameter that points to
+                    # a file containing the sorted audios...otherwise it will very
+                    # likely cause bugs ...
                     if format == "id_spkr_onset_offset":
                         idStr = '_'.join(filename.split('_')[0:-2])
+                    elif format == "id_spkr_onset_offset_spkr_onset_offset":
+                        idStr = '_'.join(filename.split('_')[0:-5])
                     elif format == "spkr-id":
                         idStr = '-'.join(filename.split('-')[0:2])
+                    elif format == "spkr_id_nb":
+                        idStr = '_'.join(filename.split('_')[0:-1])
+                    elif format == "spkr-id-nb":
+                        idStr = '-'.join(filename.split('-')[0:-1])
+                    elif format == "full_seedlings":
+                        splitted = filename.split('_')
+                        idStr = '_'.join(splitted[0:-2] + [splitted[-1]])
+                    else:
+                        if format != "no_speaker":
+                            raise ValueError("%f format unknown" % format)
 
+                    if format == "no_speaker" or no_speaker:
+                        idStr = 'anonymous'
                     if idStr not in idsTarget:
                         idsTarget[idStr] = len(idsTarget)
                         outIds.append(idStr)
@@ -945,32 +884,68 @@ def findAllSeqs(dirName,
             splitted = filename.split('_')
             return '_'.join(splitted[0:-2]), float(splitted[-2])
 
+        def get_id_spkr_onset2(x):
+            # Returns (id_spkr, onset) tuple
+            filename = x[1]
+            splitted = filename.split('_')
+            return '_'.join(splitted[0:-5]), float(splitted[-5])
+
         def get_spkr_id(x):
             # Returns (spkr, id) tuple
             filename = x[1]
             splitted = filename.split('-')
-            return splitted[0], splitted[1]
+            return splitted[0], int(splitted[1])
+
+        def get_spkr_id2(x):
+            # Returns (spkr, id) tuple
+            filename = x[1].replace(extension, '')
+            splitted = filename.split('_')
+            return splitted[0:-1], int(splitted[-1])
+
+        def get_spkr_id3(x):
+            # Returns (spkr, id) tuple
+            filename = x[1].replace(extension, '')
+            splitted = filename.split('-')
+            return splitted[0:-1], int(splitted[-1])
+
+        def get_spkr_id_full_seedlings(x):
+            # Returns (spkr, id) tuple
+            filename = x[1]
+            splitted = filename.split('_')
+            return splitted[0:-2] + [splitted[-1]], int(splitted[-2])
+
+        def get_no_speaker(x):
+            filename = x[1].replace(extension, '')
+            splitted = filename.split('_')
+            return splitted[0:-1], int(splitted[-1])
 
         if format == "id_spkr_onset_offset":
             sorting_func = get_id_spkr_onset
+        elif format == "id_spkr_onset_offset_spkr_onset_offset":
+            sorting_func = get_id_spkr_onset2
         elif format == "spkr-id":
             sorting_func = get_spkr_id
+        elif format == "spkr_id_nb":
+            sorting_func = get_spkr_id2
+        elif format == "spkr-id-nb":
+            sorting_func = get_spkr_id3
+        elif format == "full_seedlings":
+            sorting_func = get_spkr_id_full_seedlings
+        elif format == "no_speaker":
+            sorting_func = get_no_speaker
+        else:
+            raise ValueError("can't find sorting func from %s" % format)
         outSequencesIds = sorted(outSequencesIds, key=sorting_func)
-
-        try:
-            torch.save((outSequencesIds, outIds), cache_path)
-            print(f'Saved cache file at {cache_path}')
-        except OSError as err:
-            print(f'Ran in an error while saving {cache_path}: {err}')
-        return outSequencesIds, outIds
-    # For any other type of sampling
-    else:
-        try:
-            torch.save((outSequences, outSpeakers), cache_path)
-            print(f'Saved cache file at {cache_path}')
-        except OSError as err:
-            print(f'Ran in an error while saving {cache_path}: {err}')
-        return outSequences, outSpeakers
+        if format == "no_speaker" or no_speaker:
+            outSequencesIds = [(0,v) for _, v in outSequencesIds]
+        outSequences = outSequencesIds
+        outSpeakers = outIds
+    try:
+        torch.save((outSequences, outSpeakers), cache_path)
+        print(f'Saved cache file at {cache_path}')
+    except OSError as err:
+        print(f'Ran in an error while saving {cache_path}: {err}')
+    return outSequences, outSpeakers
 
 
 def parseSeqLabels(pathLabels):
