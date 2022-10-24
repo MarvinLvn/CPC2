@@ -1,7 +1,7 @@
 # Statistical learning models of early phonetic acquisition struggle with child-centered audio data
 
 
-This is the git repository associated to our publication: *Statistical learning models of early phonetic acquisition struggle with child-centered audio data*
+This is the git repository associated to our publication: [Statistical learning models of early phonetic acquisition struggle with child-centered audio data](https://psyarxiv.com/5tmgy/)
 In this repository, you'll find all the necessary code for training a contrastive predictive coding (CPC) model from raw speech.
 Adapted and modified from the publication [Unsupervised Pretraining Transfers well Across Languages](https://arxiv.org/abs/2002.02848), whose companion git repository can be found [here](https://github.com/facebookresearch/CPC_audio).
 
