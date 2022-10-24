@@ -1,10 +1,9 @@
-# Early phonetic learning from ecological audio: domain-general versus domain-specific mechanisms
+# Statistical learning models of early phonetic acquisition struggle with child-centered audio data
 
-WORK IN PROGRESS
 
-This is the git repository associated to our PNAS publication: *Early phonetic learning from ecological audio: domain-general versus domain-specific mechanisms*
+This is the git repository associated to our publication: *Statistical learning models of early phonetic acquisition struggle with child-centered audio data*
 In this repository, you'll find all the necessary code for training a contrastive predictive coding (CPC) model from raw speech.
-Adapted and modified from the publication [Unsupervised Pretraining Transfers well Across Languages](https://arxiv.org/abs/2002.02848), whose associated git repository can be found [here](https://github.com/facebookresearch/CPC_audio).
+Adapted and modified from the publication [Unsupervised Pretraining Transfers well Across Languages](https://arxiv.org/abs/2002.02848), whose companion git repository can be found [here](https://github.com/facebookresearch/CPC_audio).
 
 ### How to use ?
 
@@ -18,7 +17,7 @@ Main paper:
 
 ```
 @misc{rivire2020unsupervised,
-    title={Early phonetic learning from ecological: domain-general versus domain-specific },
+    title={Statistical learning models of early phonetic acquisition struggle with child-centered audio data},
     author={Marvin Lavechin and Maureen de Seyssel and Marianne Métais and Florian Metze and Abdelrahman Mohamed and Hervé Bredin and Emmanuel Dupoux and Alejandrina Cristia},
     year={2022},
     eprint={WIP},

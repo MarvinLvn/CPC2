@@ -1,6 +1,6 @@
 ### How to train a CPC model?
 
-1) To train a domain-specific learner (data augmentation + same pseudo-speaker sampling):
+1) To train a CPC model only on speech segments, with data augmentation, and temporal same speaker sampling:
  
 ```bash
 python cpc/train.py --pathDB $PATH_DS_DATA --pathCheckpoint /where/to/store/the/model  --file_extension .wav \
@@ -9,18 +9,18 @@ python cpc/train.py --pathDB $PATH_DS_DATA --pathCheckpoint /where/to/store/the/
   --sampling-type=temporalsamespeaker --naming-convention=id_spkr_onset_offset --no-artefacts
 ```
 
-where `$PATH_DS_DATA` contains speech segments organized as in the [data preparation](../docs/data_preparation.md) section.
+where `$PATH_DATA` contains speech segments organized as in the [data preparation](../docs/data_preparation.md) section.
 
-2) To train a domain-general learner (on the whole audio stream):
+2) To train a CPC model on speech+non-speech segments:
 
 ```bash
-python cpc/train.py --pathDB $PATH_DG_DATA --pathCheckpoint /where/to/store/the/model --file_extension .wav \
+python cpc/train.py --pathDB $PATH_DATA --pathCheckpoint /where/to/store/the/model --file_extension .wav \
   --n-levels-gru=2 --multihead-rnn --scheduler-ramp=10 --save-step=5 --n-process-loader=1 \
   --max-size-loaded=4000000000 --no-artefacts --nb-epochs=200 \
   --sampling-type=temporalsamespeaker --naming-convention=no_speaker --no-artefacts
 ```
 
-where `$PATH_DG_DATA` contains audio segments (speech and non-speech) organized as in the [data preparation](../docs/data_preparation.md) section.
+where `$PATH_DATA` contains audio segments (speech and non-speech) organized as in the [data preparation](../docs/data_preparation.md) section.
 
 ### How to compute the ABX error rate?
 
@@ -62,7 +62,7 @@ Then the following line will submit the job:
 sbatch -o my_first_model.txt train_CPC_multi_machines.txt
 ```
 
-### Signal-quality aware loss
+### Bonus: Signal-quality aware loss (WIP)
 
 (Currently works with Alodie's repo; needs to integrate her code)
 First, let us predict signal quality measures of the training set:
