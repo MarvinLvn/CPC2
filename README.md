@@ -16,7 +16,7 @@ Adapted and modified from the publication [Unsupervised Pretraining Transfers we
 Main paper:
 
 ```
-@misc{rivire2020unsupervised,
+@misc{statlearning2022lavechin,
     title={Statistical learning models of early phonetic acquisition struggle with child-centered audio data},
     author={Marvin Lavechin and Maureen de Seyssel and Marianne Métais and Florian Metze and Abdelrahman Mohamed and Hervé Bredin and Emmanuel Dupoux and Alejandrina Cristia},
     year={2022},
