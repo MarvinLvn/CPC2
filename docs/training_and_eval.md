@@ -1,12 +1,12 @@
 ### How to train a CPC model?
 
-To train a CPC model with data augmentation, and temporal same speaker sampling:
+To train a CPC model with data augmentation, and same speaker sampling:
  
 ```bash
 python cpc/train.py --pathDB /path/to/data --pathCheckpoint /path/to/output  --file_extension .wav \
   --n-levels-gru=2 --multihead-rnn --scheduler-ramp=10 --save-step=5 --n-process-loader=1 \
   --max-size-loaded=4000000000 --no-artefacts --nb-epochs=200 --augment-past --augment-type=pitch,artificial_reverb \
-  --sampling-type=temporalsamespeaker --naming-convention=id_spkr_onset_offset --no-artefacts
+  --sampling-type=samespeaker
 ```
 
 where `/path/to/data` contains audio segments organized as in the [data preparation](../docs/data_preparation.md) section
