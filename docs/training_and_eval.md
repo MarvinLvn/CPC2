@@ -1,26 +1,15 @@
 ### How to train a CPC model?
 
-1) To train a CPC model only on speech segments, with data augmentation, and temporal same speaker sampling:
+To train a CPC model with data augmentation, and temporal same speaker sampling:
  
 ```bash
-python cpc/train.py --pathDB $PATH_DS_DATA --pathCheckpoint /where/to/store/the/model  --file_extension .wav \
+python cpc/train.py --pathDB /path/to/data --pathCheckpoint /path/to/output  --file_extension .wav \
   --n-levels-gru=2 --multihead-rnn --scheduler-ramp=10 --save-step=5 --n-process-loader=1 \
   --max-size-loaded=4000000000 --no-artefacts --nb-epochs=200 --augment-past --augment-type=pitch,artificial_reverb \
   --sampling-type=temporalsamespeaker --naming-convention=id_spkr_onset_offset --no-artefacts
 ```
 
-where `$PATH_DATA` contains speech segments organized as in the [data preparation](../docs/data_preparation.md) section.
-
-2) To train a CPC model on speech+non-speech segments:
-
-```bash
-python cpc/train.py --pathDB $PATH_DATA --pathCheckpoint /where/to/store/the/model --file_extension .wav \
-  --n-levels-gru=2 --multihead-rnn --scheduler-ramp=10 --save-step=5 --n-process-loader=1 \
-  --max-size-loaded=4000000000 --no-artefacts --nb-epochs=200 \
-  --sampling-type=temporalsamespeaker --naming-convention=no_speaker --no-artefacts
-```
-
-where `$PATH_DATA` contains audio segments (speech and non-speech) organized as in the [data preparation](../docs/data_preparation.md) section.
+where `/path/to/data` contains audio segments organized as in the [data preparation](../docs/data_preparation.md) section
 
 ### How to compute the ABX error rate?
 
@@ -64,21 +53,13 @@ sbatch -o my_first_model.txt train_CPC_multi_machines.txt
 
 ### Bonus: Signal-quality aware loss (WIP)
 
-(Currently works with Alodie's repo; needs to integrate her code)
-First, let us predict signal quality measures of the training set:
+You can use [Brouhaha](https://github.com/marianne-m/brouhaha-vad) to predict the Speech-to-Noise Ratio and the C50 of audio segments.
 
-```bash
-python CPC_torch/cpc/eval/inference_vad.py --pathDB $PATH_DB \
-    --pathPretrained model/CPC_libribig_600_noise_smooth_reverb_reverse_FT_librispeech/checkpoint_24.pt --pathOut $PATH_PREDICTIONS --file_extension .wav \
-    --ignore_cache --hiddenGar 512 --hiddenEncoder 512 --window_shift 160 --no_sentence_level --no_speech 
-```
-
-where `$PATH_DB` is the path to the training set, and `$PATH_PREDICTIONS` is the folder where to store predictions. The command above will create `.pt` files, with each line of a `.pt` file being the predicted snr (first column) and the 
-predicted c50 (second column) for a 100ms frame.
 
 Once this has been done, we can train the model using the signal-quality aware loss by running:
 
 ```bash
+# Needs to be updated with Brouhaha code
 python CPC_audio/cpc/train.py --pathDB $PATH_DB --pathCheckpoint $PATH_OUT --file_extension .wav --n_process_loader 1 --save_step 5 \
   --schedulerRamp 10 --nLevelsGRU 2 --augment_past --augment_type pitch artificial_reverb --shift_max 300 \
   --multihead_rnn --samplingType samespeaker --nEpoch 200 \
