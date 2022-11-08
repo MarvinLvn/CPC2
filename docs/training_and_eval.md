@@ -48,7 +48,7 @@ srun python CPC2/cpc/train.py --distributed --master_port $MASTER_PORT --pathDB 
 Then the following line will submit the job:
 
 ```bash
-sbatch -o my_first_model.txt train_CPC_multi_machines.txt
+sbatch -o my_first_model.txt train_CPC_multi_machines.sh
 ```
 
 ### Bonus: Signal-quality aware loss (WIP)
