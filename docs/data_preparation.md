@@ -38,14 +38,14 @@ python data/extract_segments.py --audio_path /path/to/audio --rttm_path /path/to
 ```
 
 This will create a training set of 128h of audio with segments produced by male and female speakers whose duration is at least 1.5s.
-Then, you can create 
+Then, you can run:
 
 ```bash
 python data/build_power_two_training.py --audio_path /path/to/speech/segments --output_path=/path/to/output \
   --nb_packets=16 --duration=28800
 ```
 
-This will create 16 training sets of 8 hours (28800 seconds), merged two by two to create 8 training sets of 16 hours, ... until a single training set of 128 hours is obtainbed.
+This will create 16 training sets of 8 hours (28800 seconds), merged two by two to create 8 training sets of 16 hours, ... until a single training set of 128 hours is obtained.
 
 
 #### 2. Remove noisy and/or reverberated segments 
