@@ -34,10 +34,19 @@ Both return `.rttm` files indicating where there is speech in each audio file. I
 
 ```bash
 python data/extract_segments.py --audio_path /path/to/audio --rttm_path /path/to/rttm --output_path /path/to/output \
-  --durations [8, 16, 32, 64, 128] --sampling random --classes [MAL,FEM] --min_dur 1.5
+  --durations [128] --sampling random --classes [MAL,FEM] --min_dur 1.5
 ```
 
-This will create 8h, 16h, ..., 128h training sets with segments produced by male and female speakers whose duration is at least 1.5s.
+This will create a training set of 128h of audio with segments produced by male and female speakers whose duration is at least 1.5s.
+Then, you can create 
+
+```bash
+python data/build_power_two_training.py --audio_path /path/to/speech/segments --output_path=/path/to/output \
+  --nb_packets=16 --duration=28800
+```
+
+This will create 16 training sets of 8 hours (28800 seconds), merged two by two to create 8 training sets of 16 hours, ... until a single training set of 128 hours is obtainbed.
+
 
 #### 2. Remove noisy and/or reverberated segments 
 
