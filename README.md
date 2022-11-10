@@ -29,7 +29,7 @@ Main paper:
 Code from which our work has been based on:
 
 ```
-@misc{rivire2020unsupervised,
+@misc{riviere2020unsupervised,
     title={Unsupervised pretraining transfers well across languages},
     author={Morgane Rivière and Armand Joulin and Pierre-Emmanuel Mazaré and Emmanuel Dupoux},
     year={2020},
