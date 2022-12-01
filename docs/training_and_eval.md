@@ -17,7 +17,7 @@ You can compute the ABX error rate on the [Zerospeech2017 dataset](https://zeros
 To begin, download the dataset [here](https://download.zerospeech.com/). Then run the ABX evaluation on a given checkpoint with:
 
 ```bash
-python ABX.py from_checkpoint $PATH_CHECKPOINT $PATH_ITEM_FILE $DATASET_PATH --seq_norm --strict --file_extension .wav --out $PATH_OUT
+python CPC2/cpc/eval/eval_ABX.py from_checkpoint $PATH_CHECKPOINT $PATH_ITEM_FILE $DATASET_PATH --seq_norm --strict --file_extension .wav --out $PATH_OUT
 ```
 Where:
 - $PATH_CHECKPOINT is the path pointing to the checkpoint to evaluate
