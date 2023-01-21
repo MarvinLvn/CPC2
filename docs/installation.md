@@ -10,7 +10,7 @@ git clone https://github.com/MarvinLvn/CPC2.git && cd CPC2
 
 # Step 2 : create conda env called "cpc2", installing all the required dependencies
 conda env create -f environment.yml
-python setup.py develop
+pip install -e .
 
 # Step 3: install WavAugment
 git clone https://github.com/facebookresearch/WavAugment.git && cd WavAugment
