@@ -14,17 +14,31 @@ def normalize_with_singularity(x):
     Extend all vectors by eps=1e-12 to put the null vector at the maximal
     cosine distance from any non-null vector.
     """
-    N, S, H = x.size()
-    norm_x = (x**2).sum(dim=2, keepdim=True) + 1e-12
+    if len(x.size())==3:
+        N, S, H = x.size()
+        norm_x = (x**2).sum(dim=2, keepdim=True) + 1e-12
 
-    x /= torch.sqrt(norm_x)
-    zero_vals = (norm_x == 0).view(N, S)
-    x[zero_vals] = 1 / math.sqrt(H)
-    border_vect = torch.zeros((N, S, 1),
-                              dtype=x.dtype,
-                              device=x.device) + 1e-12
-    border_vect[zero_vals] = -2*1e12
-    return torch.cat([x, border_vect], dim=2)
+        x /= torch.sqrt(norm_x)
+        zero_vals = (norm_x == 0).view(N, S)
+        x[zero_vals] = 1 / math.sqrt(H)
+        border_vect = torch.zeros((N, S, 1),
+                                  dtype=x.dtype,
+                                  device=x.device) + 1e-12
+        border_vect[zero_vals] = -2*1e12
+        return torch.cat([x, border_vect], dim=2)
+
+    else:
+        S, H = x.size()
+        norm_x = (x**2).sum(dim=1, keepdim=True)
+
+        x /= torch.sqrt(norm_x)
+        zero_vals = (norm_x == 0).view(S)
+        x[zero_vals] = 1 / math.sqrt(H)
+        border_vect = torch.zeros((S, 1),
+                                  dtype=x.dtype,
+                                  device=x.device) + 1e-12
+        border_vect[zero_vals] = -2*1e12
+        return torch.cat([x, border_vect], dim=1)
 
 
 def load_item_file(path_item_file):
@@ -173,7 +187,8 @@ class ABXFeatureLoader:
                 features = normalize_with_singularity(features)
 
             features = features.detach().cpu()
-            features = features.view(features.size(1), features.size(2))
+            if len(features.size()) > 2:
+                features = features.view(features.size(1), features.size(2))
 
             phone_data = files_data[fileID]
 
