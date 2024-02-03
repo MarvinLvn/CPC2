@@ -1,7 +1,7 @@
-# Statistical learning models of early phonetic acquisition struggle with child-centered audio data
+# Modeling early phonetic acquisition from child-centered audio data
 
 
-This is the git repository associated to our publication: [Statistical learning models of early phonetic acquisition struggle with child-centered audio data](https://psyarxiv.com/5tmgy/)
+This is the git repository associated to our publication: [Modeling early phonetic acquisition from child-centered audio data](https://psyarxiv.com/5tmgy/)
 In this repository, you'll find all the necessary code for training a contrastive predictive coding (CPC) model from raw speech.
 Adapted and modified from the publication [Unsupervised Pretraining Transfers well Across Languages](https://arxiv.org/abs/2002.02848), whose companion git repository can be found [here](https://github.com/facebookresearch/CPC_audio).
 
@@ -16,25 +16,10 @@ Adapted and modified from the publication [Unsupervised Pretraining Transfers we
 Main paper:
 
 ```
-@misc{statlearning2022lavechin,
+@article{lavechin2024modeling,
     title={Statistical learning models of early phonetic acquisition struggle with child-centered audio data},
-    author={Marvin Lavechin and Maureen de Seyssel and Marianne Métais and Florian Metze and Abdelrahman Mohamed and Hervé Bredin and Emmanuel Dupoux and Alejandrina Cristia},
-    year={2022},
-    eprint={WIP},
-    archivePrefix={arXiv},
-    primaryClass={eess.AS}
-}
-```
-
-Code from which our work has been based on:
-
-```
-@misc{riviere2020unsupervised,
-    title={Unsupervised pretraining transfers well across languages},
-    author={Morgane Rivière and Armand Joulin and Pierre-Emmanuel Mazaré and Emmanuel Dupoux},
-    year={2020},
-    eprint={2002.02848},
-    archivePrefix={arXiv},
-    primaryClass={eess.AS}
+  author={Lavechin, Marvin and De Seyssel, Maureen and M{\'e}tais, Marianne and Metze, Florian and Mohamed, Abdelrahman and Bredin, Herv{\'e} and Dupoux, Emmanuel and Cristia, Alejandrina},
+  year={2023},
+  publisher={Cognition}
 }
 ```
