@@ -19,7 +19,7 @@ Main paper:
 @article{lavechin2024modeling,
     title={Statistical learning models of early phonetic acquisition struggle with child-centered audio data},
   author={Lavechin, Marvin and De Seyssel, Maureen and M{\'e}tais, Marianne and Metze, Florian and Mohamed, Abdelrahman and Bredin, Herv{\'e} and Dupoux, Emmanuel and Cristia, Alejandrina},
-  year={2023},
+  year={2024},
   publisher={Cognition}
 }
 ```
